@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MeetingRecorder.Core</AssemblyName>
+    <RootNamespace>MeetingRecorder.Core</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ScreenRecorderLib" />
+    <PackageReference Include="NAudio.Wasapi" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+.packages/
+.tools/
+.vs/
+artifacts/
+dist/
+TestResults/
+*.user
+*.suo
+*.log
+
+# Runtime user data
+UserData/
+Recordings/
+*.partial.mp4
+*.partial.m4a
+*.staging.mp4
+
+# Local-only third-party redistributables (download from Microsoft when needed)
+installer/prerequisites/
+
+# Patch backups
+*.orig

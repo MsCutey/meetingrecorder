@@ -1,0 +1,30 @@
+<Window x:Class="MeetingRecorder.App.RecordingNoticeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="录制授权提示" Width="560" Height="455" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F8FAFC">
+  <Grid Margin="30">
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <StackPanel>
+      <Border Width="52" Height="52" CornerRadius="26" Background="#FEE4E2" HorizontalAlignment="Left">
+        <TextBlock Text="●" Foreground="#D92D20" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+      <TextBlock Text="录制前，请先取得参会者授权" FontSize="22" FontWeight="SemiBold" Foreground="#101828" Margin="0,18,0,8" />
+      <TextBlock Text="MeetingRecorder 不提供隐蔽录制模式，也不会上传任何录制内容。" Foreground="#475467" TextWrapping="Wrap" />
+    </StackPanel>
+    <Border Grid.Row="1" Background="White" BorderBrush="#E4E7EC" BorderThickness="1" CornerRadius="10" Padding="18" Margin="0,20,0,18">
+      <StackPanel>
+        <TextBlock Text="使用须知" FontWeight="SemiBold" Foreground="#344054" Margin="0,0,0,10" />
+        <TextBlock Text="• 录制实时会议前，应遵守适用法律、单位制度及会议平台规则。&#x0a;• 系统声音会包含所选扬声器上播放的全部声音。&#x0a;• 软件不会绕过 DRM、安全桌面或平台限制。&#x0a;• 文件仅保存在本机，由你负责保管和删除。"
+                   Foreground="#475467" TextWrapping="Wrap" LineHeight="25" />
+        <CheckBox x:Name="ConsentCheckBox" Margin="0,18,0,0" FontWeight="SemiBold"
+                  Content="我确认会在录制前取得所有必要授权" />
+      </StackPanel>
+    </Border>
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="拒绝并退出" Width="112" Margin="0,0,10,0" Style="{StaticResource SoftButtonStyle}" Click="DeclineClick" />
+      <Button Content="我已了解并同意" Width="148" Style="{StaticResource PrimaryButtonStyle}" Padding="14,10"
+              IsEnabled="{Binding IsChecked, ElementName=ConsentCheckBox}" Click="AcceptClick" />
+    </StackPanel>
+  </Grid>
+</Window>

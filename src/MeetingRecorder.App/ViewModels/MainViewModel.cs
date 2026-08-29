@@ -1,0 +1,558 @@
+using System.Collections.ObjectModel;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using MeetingRecorder.App.Services;
+using MeetingRecorder.Core.Abstractions;
+using MeetingRecorder.Core.Models;
+
+namespace MeetingRecorder.App.ViewModels;
+
+public sealed class MainViewModel : ObservableObject, IAsyncDisposable
+{
+    private readonly IRecordingService _recordingService;
+    private readonly IAppRepository _repository;
+    private readonly IDesktopDialogService _dialogs;
+    private readonly SynchronizationContext _uiContext;
+    private AppSettings _loadedSettings = new();
+    private RecordingMode _selectedMode = RecordingMode.VideoAndAudio;
+    private VideoQualityPreset _selectedQuality = VideoQualityPreset.FullHd;
+    private CaptureTargetInfo? _selectedTarget;
+    private AudioDeviceInfo? _selectedSystemAudioDevice;
+    private AudioDeviceInfo? _selectedMicrophoneDevice;
+    private bool _captureSystemAudio = true;
+    private bool _captureMicrophone = true;
+    private string _outputDirectory = AppSettings.DefaultOutputDirectory();
+    private int _countdownSeconds = 3;
+    private string _startStopHotKey = "Ctrl+Shift+F9";
+    private string _pauseResumeHotKey = "Ctrl+Shift+F10";
+    private RecordingState _state = RecordingState.Idle;
+    private string _statusText = "准备就绪";
+    private string? _warningText;
+    private string _elapsedText = "00:00:00";
+    private string _fileSizeText = "0 B";
+    private string _diskTimeText = "—";
+    private double _systemAudioLevel;
+    private double _microphoneLevel;
+    private ImageSource? _previewImage;
+    private bool _isLoading = true;
+    private bool _isInitialized;
+    private bool _isSaving;
+    private bool _disposed;
+    private int _previewUpdatePending;
+
+    public MainViewModel(IRecordingService recordingService, IAppRepository repository, IDesktopDialogService dialogs)
+    {
+        _recordingService = recordingService;
+        _repository = repository;
+        _dialogs = dialogs;
+        _uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
+
+        _recordingService.StateChanged += OnRecordingStateChanged;
+        _recordingService.ProgressChanged += OnRecordingProgressChanged;
+        _recordingService.PreviewFrameAvailable += OnPreviewFrameAvailable;
+        _recordingService.RecordingCompleted += OnRecordingCompleted;
+
+        PrimaryCommand = new AsyncRelayCommand(_ => ExecutePrimaryAsync(), _ => State != RecordingState.Finalizing && !IsLoading);
+        PauseResumeCommand = new AsyncRelayCommand(_ => ExecutePauseResumeAsync(), _ => State is RecordingState.Recording or RecordingState.Paused);
+        RefreshDevicesCommand = new AsyncRelayCommand(_ => RefreshDevicesAsync(), _ => IsEditingEnabled && !IsLoading);
+        BrowseOutputCommand = new RelayCommand(_ => BrowseOutput(), _ => IsEditingEnabled);
+        OpenOutputCommand = new RelayCommand(_ => _dialogs.OpenFolder(OutputDirectory));
+        OpenHistoryItemCommand = new RelayCommand(OpenHistoryItem);
+        RecoverCommand = new AsyncRelayCommand(RecoverAsync);
+    }
+
+    public ObservableCollection<CaptureTargetInfo> CaptureTargets { get; } = [];
+    public ObservableCollection<AudioDeviceInfo> SystemAudioDevices { get; } = [];
+    public ObservableCollection<AudioDeviceInfo> MicrophoneDevices { get; } = [];
+    public ObservableCollection<RecordingHistoryRow> History { get; } = [];
+    public ObservableCollection<RecoveryCandidate> RecoveryCandidates { get; } = [];
+    public IReadOnlyList<Choice<VideoQualityPreset>> QualityChoices { get; } =
+    [
+        new(VideoQualityPreset.FullHd, "1080p · 1920×1080"),
+        new(VideoQualityPreset.Hd, "720p · 1280×720"),
+        new(VideoQualityPreset.Source, "源分辨率")
+    ];
+    public IReadOnlyList<int> CountdownChoices { get; } = [0, 3, 5, 10];
+
+    public AsyncRelayCommand PrimaryCommand { get; }
+    public AsyncRelayCommand PauseResumeCommand { get; }
+    public AsyncRelayCommand RefreshDevicesCommand { get; }
+    public RelayCommand BrowseOutputCommand { get; }
+    public RelayCommand OpenOutputCommand { get; }
+    public RelayCommand OpenHistoryItemCommand { get; }
+    public AsyncRelayCommand RecoverCommand { get; }
+
+    public nint WindowToExclude { get; set; }
+
+    public RecordingMode SelectedMode
+    {
+        get => _selectedMode;
+        set
+        {
+            if (!SetProperty(ref _selectedMode, value)) return;
+            OnPropertyChanged(nameof(IsVideoMode));
+            OnPropertyChanged(nameof(IsAudioOnlyMode));
+            OnPropertyChanged(nameof(ModeDescription));
+            RefreshCommandStates();
+            ScheduleSettingsSave();
+        }
+    }
+
+    public bool IsVideoMode => SelectedMode == RecordingMode.VideoAndAudio;
+    public bool IsAudioOnlyMode => SelectedMode == RecordingMode.AudioOnly;
+    public string ModeDescription => IsVideoMode
+        ? "捕获指定显示器或窗口，同时收录所选声音"
+        : "只生成 AAC/M4A 音频，不访问真实屏幕";
+
+    public VideoQualityPreset SelectedQuality
+    {
+        get => _selectedQuality;
+        set { if (SetProperty(ref _selectedQuality, value)) ScheduleSettingsSave(); }
+    }
+
+    public CaptureTargetInfo? SelectedTarget
+    {
+        get => _selectedTarget;
+        set { if (SetProperty(ref _selectedTarget, value)) RefreshCommandStates(); }
+    }
+
+    public AudioDeviceInfo? SelectedSystemAudioDevice
+    {
+        get => _selectedSystemAudioDevice;
+        set { if (SetProperty(ref _selectedSystemAudioDevice, value)) ScheduleSettingsSave(); }
+    }
+
+    public AudioDeviceInfo? SelectedMicrophoneDevice
+    {
+        get => _selectedMicrophoneDevice;
+        set { if (SetProperty(ref _selectedMicrophoneDevice, value)) ScheduleSettingsSave(); }
+    }
+
+    public bool CaptureSystemAudio
+    {
+        get => _captureSystemAudio;
+        set
+        {
+            if (!SetProperty(ref _captureSystemAudio, value)) return;
+            RefreshCommandStates();
+            ScheduleSettingsSave();
+        }
+    }
+
+    public bool CaptureMicrophone
+    {
+        get => _captureMicrophone;
+        set
+        {
+            if (!SetProperty(ref _captureMicrophone, value)) return;
+            RefreshCommandStates();
+            ScheduleSettingsSave();
+        }
+    }
+
+    public string OutputDirectory
+    {
+        get => _outputDirectory;
+        set
+        {
+            if (!SetProperty(ref _outputDirectory, value)) return;
+            RefreshCommandStates();
+            ScheduleSettingsSave();
+        }
+    }
+
+    public int CountdownSeconds
+    {
+        get => _countdownSeconds;
+        set { if (SetProperty(ref _countdownSeconds, value)) ScheduleSettingsSave(); }
+    }
+
+    public string StartStopHotKey
+    {
+        get => _startStopHotKey;
+        set
+        {
+            if (!SetProperty(ref _startStopHotKey, value)) return;
+            ScheduleSettingsSave();
+            HotKeysChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public string PauseResumeHotKey
+    {
+        get => _pauseResumeHotKey;
+        set
+        {
+            if (!SetProperty(ref _pauseResumeHotKey, value)) return;
+            ScheduleSettingsSave();
+            HotKeysChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public RecordingState State
+    {
+        get => _state;
+        private set
+        {
+            if (!SetProperty(ref _state, value)) return;
+            OnPropertyChanged(nameof(IsEditingEnabled));
+            OnPropertyChanged(nameof(IsActivelyRecording));
+            OnPropertyChanged(nameof(PrimaryButtonText));
+            OnPropertyChanged(nameof(PauseButtonText));
+            RefreshCommandStates();
+        }
+    }
+
+    public bool IsEditingEnabled => State is RecordingState.Idle or RecordingState.Failed;
+    public bool IsActivelyRecording => State is RecordingState.Recording or RecordingState.Paused or RecordingState.Finalizing;
+    public string PrimaryButtonText => State switch
+    {
+        RecordingState.Idle or RecordingState.Failed => "●  开始录制",
+        RecordingState.Countdown => "取消倒计时",
+        RecordingState.Recording or RecordingState.Paused => "■  停止录制",
+        RecordingState.Finalizing => "正在安全收尾…",
+        _ => "开始录制"
+    };
+    public string PauseButtonText => State == RecordingState.Paused ? "▶  恢复" : "Ⅱ  暂停";
+
+    public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
+    public string? WarningText { get => _warningText; private set { if (SetProperty(ref _warningText, value)) OnPropertyChanged(nameof(HasWarning)); } }
+    public bool HasWarning => !string.IsNullOrWhiteSpace(WarningText);
+    public string ElapsedText { get => _elapsedText; private set => SetProperty(ref _elapsedText, value); }
+    public string FileSizeText { get => _fileSizeText; private set => SetProperty(ref _fileSizeText, value); }
+    public string DiskTimeText { get => _diskTimeText; private set => SetProperty(ref _diskTimeText, value); }
+    public double SystemAudioLevel { get => _systemAudioLevel; private set => SetProperty(ref _systemAudioLevel, value); }
+    public double MicrophoneLevel { get => _microphoneLevel; private set => SetProperty(ref _microphoneLevel, value); }
+    public ImageSource? PreviewImage { get => _previewImage; private set { if (SetProperty(ref _previewImage, value)) OnPropertyChanged(nameof(HasPreview)); } }
+    public bool HasPreview => PreviewImage is not null;
+    public bool IsLoading { get => _isLoading; private set { if (SetProperty(ref _isLoading, value)) RefreshCommandStates(); } }
+    public bool HasRecoveries => RecoveryCandidates.Count > 0;
+    public string RecoveryBannerText => $"发现 {RecoveryCandidates.Count} 个异常中断的录制，可尝试恢复。";
+    public bool IsPortable => _repository.Paths.IsPortable;
+    public string StorageModeText => IsPortable ? "便携模式 · 数据保存在程序旁" : "本机模式 · 数据保存在 LocalAppData";
+
+    public event EventHandler? HotKeysChanged;
+    public event EventHandler<RecordingState>? RecordingActivityChanged;
+
+    public async Task InitializeAsync()
+    {
+        if (_isInitialized) return;
+        IsLoading = true;
+        try
+        {
+            _loadedSettings = await _repository.LoadSettingsAsync();
+            ApplySettings(_loadedSettings);
+            await Task.WhenAll(RefreshDevicesAsync(), RefreshHistoryAsync(), RefreshRecoveryAsync());
+            _isInitialized = true;
+            StatusText = "准备就绪";
+        }
+        catch (Exception error)
+        {
+            StatusText = "初始化失败";
+            WarningText = error.Message;
+            _dialogs.ShowError("初始化失败", error.Message);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    public async Task<bool> EnsureRecordingNoticeAsync()
+    {
+        if (_loadedSettings.HasAcceptedRecordingNotice) return true;
+        if (!_dialogs.ShowRecordingNotice()) return false;
+        _loadedSettings = BuildSettings() with { HasAcceptedRecordingNotice = true };
+        await _repository.SaveSettingsAsync(_loadedSettings);
+        return true;
+    }
+
+    public async Task ExecutePrimaryAsync()
+    {
+        try
+        {
+            if (State is RecordingState.Countdown or RecordingState.Recording or RecordingState.Paused)
+            {
+                await _recordingService.StopAsync();
+                return;
+            }
+            if (State == RecordingState.Finalizing) return;
+            if (!await EnsureRecordingNoticeAsync()) return;
+
+            WarningText = null;
+            var request = new RecordingRequest
+            {
+                Mode = SelectedMode,
+                CaptureTarget = SelectedTarget,
+                SystemAudioDevice = SelectedSystemAudioDevice,
+                MicrophoneDevice = SelectedMicrophoneDevice,
+                CaptureSystemAudio = CaptureSystemAudio,
+                CaptureMicrophone = CaptureMicrophone,
+                Quality = SelectedQuality,
+                OutputDirectory = OutputDirectory,
+                CountdownSeconds = CountdownSeconds,
+                PreferHardwareEncoding = true,
+                WindowToExclude = WindowToExclude
+            };
+            await _recordingService.StartAsync(request);
+        }
+        catch (Exception error)
+        {
+            WarningText = error.Message;
+            _dialogs.ShowError("录制失败", error.Message);
+        }
+    }
+
+    public async Task ExecutePauseResumeAsync()
+    {
+        try
+        {
+            if (State == RecordingState.Recording) await _recordingService.PauseAsync();
+            else if (State == RecordingState.Paused) await _recordingService.ResumeAsync();
+        }
+        catch (Exception error)
+        {
+            WarningText = error.Message;
+            _dialogs.ShowError("操作失败", error.Message);
+        }
+    }
+
+    public async Task<bool> PrepareForExitAsync()
+    {
+        if (State is RecordingState.Countdown or RecordingState.Recording or RecordingState.Paused)
+        {
+            if (!_dialogs.Confirm("退出 MeetingRecorder", "当前录制尚未结束。是否先安全停止录制并退出？")) return false;
+            try { await _recordingService.StopAsync(); }
+            catch (Exception error) { _dialogs.ShowError("安全收尾失败", error.Message); }
+        }
+        await SaveSettingsAsync();
+        return true;
+    }
+
+    public Task SaveSettingsAsync() => _repository.SaveSettingsAsync(BuildSettings());
+
+    private async Task RefreshDevicesAsync()
+    {
+        var previousTarget = SelectedTarget?.Id;
+        var previousSystem = SelectedSystemAudioDevice?.Id ?? _loadedSettings.SystemAudioDeviceId;
+        var previousMicrophone = SelectedMicrophoneDevice?.Id ?? _loadedSettings.MicrophoneDeviceId;
+        var targetsTask = _recordingService.GetCaptureTargetsAsync();
+        var systemTask = _recordingService.GetAudioDevicesAsync(AudioSourceKind.SystemAudio);
+        var microphoneTask = _recordingService.GetAudioDevicesAsync(AudioSourceKind.Microphone);
+        await Task.WhenAll(targetsTask, systemTask, microphoneTask);
+
+        Replace(CaptureTargets, await targetsTask);
+        Replace(SystemAudioDevices, await systemTask);
+        Replace(MicrophoneDevices, await microphoneTask);
+        SelectedTarget = CaptureTargets.FirstOrDefault(item => item.Id == previousTarget) ?? CaptureTargets.FirstOrDefault();
+        SelectedSystemAudioDevice = SystemAudioDevices.FirstOrDefault(item => item.Id == previousSystem)
+                                    ?? SystemAudioDevices.FirstOrDefault(item => item.IsDefault)
+                                    ?? SystemAudioDevices.FirstOrDefault();
+        SelectedMicrophoneDevice = MicrophoneDevices.FirstOrDefault(item => item.Id == previousMicrophone)
+                                   ?? MicrophoneDevices.FirstOrDefault(item => item.IsDefault)
+                                   ?? MicrophoneDevices.FirstOrDefault();
+        if (MicrophoneDevices.Count == 0) CaptureMicrophone = false;
+        if (SystemAudioDevices.Count == 0) CaptureSystemAudio = false;
+    }
+
+    private async Task RefreshHistoryAsync()
+    {
+        var items = await _repository.LoadHistoryAsync();
+        History.Clear();
+        foreach (var item in items) History.Add(new RecordingHistoryRow(item));
+    }
+
+    private async Task RefreshRecoveryAsync()
+    {
+        var items = await _repository.ScanRecoveryAsync();
+        RecoveryCandidates.Clear();
+        foreach (var item in items) RecoveryCandidates.Add(item);
+        OnPropertyChanged(nameof(HasRecoveries));
+        OnPropertyChanged(nameof(RecoveryBannerText));
+    }
+
+    private async Task RecoverAsync(object? parameter)
+    {
+        if (parameter is not RecoveryCandidate candidate) return;
+        try
+        {
+            var recovered = await _repository.RecoverAsync(candidate);
+            RecoveryCandidates.Remove(candidate);
+            OnPropertyChanged(nameof(HasRecoveries));
+            OnPropertyChanged(nameof(RecoveryBannerText));
+            _dialogs.ShowInformation("恢复完成", $"已保留可恢复媒体：\n{recovered}\n\n异常中断文件可能仍需播放器或媒体修复工具重建索引。");
+        }
+        catch (Exception error)
+        {
+            _dialogs.ShowError("恢复失败", error.Message);
+        }
+    }
+
+    private void BrowseOutput()
+    {
+        var selected = _dialogs.SelectFolder(OutputDirectory);
+        if (!string.IsNullOrWhiteSpace(selected)) OutputDirectory = selected;
+    }
+
+    private void OpenHistoryItem(object? parameter)
+    {
+        if (parameter is RecordingHistoryRow row) _dialogs.ShowInFolder(row.Item.FilePath);
+    }
+
+    private void OnRecordingStateChanged(object? sender, RecordingStateChangedEventArgs eventArgs) => RunOnUi(() =>
+    {
+        State = eventArgs.Current;
+        StatusText = eventArgs.Current switch
+        {
+            RecordingState.Idle => "准备就绪",
+            RecordingState.Countdown => "录制即将开始",
+            RecordingState.Recording => "正在录制",
+            RecordingState.Paused => "已暂停",
+            RecordingState.Finalizing => "正在写入媒体索引，请勿关机",
+            RecordingState.Failed => "录制异常 · 已保留恢复文件",
+            _ => eventArgs.Current.ToString()
+        };
+        if (eventArgs.Current == RecordingState.Idle) PreviewImage = null;
+        RecordingActivityChanged?.Invoke(this, eventArgs.Current);
+    });
+
+    private void OnRecordingProgressChanged(object? sender, RecordingProgressEventArgs eventArgs) => RunOnUi(() =>
+    {
+        var progress = eventArgs.Progress;
+        ElapsedText = FormatDuration(progress.Elapsed);
+        FileSizeText = FormatBytes(progress.FileSizeBytes);
+        DiskTimeText = progress.EstimatedDiskTimeRemaining is null
+            ? "—"
+            : progress.EstimatedDiskTimeRemaining.Value.TotalHours >= 100
+                ? "> 99 小时"
+                : FormatDuration(progress.EstimatedDiskTimeRemaining.Value);
+        SystemAudioLevel = progress.SystemAudioLevel * 100;
+        MicrophoneLevel = progress.MicrophoneLevel * 100;
+        WarningText = progress.Warning;
+    });
+
+    private void OnPreviewFrameAvailable(object? sender, PreviewFrameEventArgs eventArgs)
+    {
+        if (Interlocked.Exchange(ref _previewUpdatePending, 1) != 0) return;
+        RunOnUi(() =>
+        {
+            try
+            {
+                var frame = eventArgs.Frame;
+                var stride = Math.Abs(frame.Stride);
+                var image = BitmapSource.Create(frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null, frame.Bgra32, stride);
+                image.Freeze();
+                PreviewImage = image;
+            }
+            catch (ArgumentException)
+            {
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _previewUpdatePending, 0);
+            }
+        });
+    }
+
+    private void OnRecordingCompleted(object? sender, RecordingCompletedEventArgs eventArgs) => RunOnUi(async () =>
+    {
+        await RefreshHistoryAsync();
+        WarningText = null;
+    });
+
+    private void ApplySettings(AppSettings settings)
+    {
+        _selectedMode = settings.Mode;
+        _selectedQuality = settings.Quality;
+        _captureSystemAudio = settings.CaptureSystemAudio;
+        _captureMicrophone = settings.CaptureMicrophone;
+        _outputDirectory = settings.OutputDirectory;
+        _countdownSeconds = settings.CountdownSeconds;
+        _startStopHotKey = settings.StartStopHotKey;
+        _pauseResumeHotKey = settings.PauseResumeHotKey;
+        OnPropertyChanged(string.Empty);
+    }
+
+    private AppSettings BuildSettings() => _loadedSettings with
+    {
+        Mode = SelectedMode,
+        Quality = SelectedQuality,
+        CaptureSystemAudio = CaptureSystemAudio,
+        CaptureMicrophone = CaptureMicrophone,
+        SystemAudioDeviceId = SelectedSystemAudioDevice?.Id,
+        MicrophoneDeviceId = SelectedMicrophoneDevice?.Id,
+        OutputDirectory = OutputDirectory,
+        CountdownSeconds = CountdownSeconds,
+        StartStopHotKey = StartStopHotKey,
+        PauseResumeHotKey = PauseResumeHotKey
+    };
+
+    private void ScheduleSettingsSave()
+    {
+        if (!_isInitialized || _isSaving) return;
+        _ = PersistSettingsSafeAsync();
+    }
+
+    private async Task PersistSettingsSafeAsync()
+    {
+        _isSaving = true;
+        try
+        {
+            await Task.Delay(150);
+            _loadedSettings = BuildSettings();
+            await _repository.SaveSettingsAsync(_loadedSettings);
+        }
+        catch (Exception error)
+        {
+            RunOnUi(() => WarningText = $"设置未保存：{error.Message}");
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private void RefreshCommandStates()
+    {
+        PrimaryCommand.RaiseCanExecuteChanged();
+        PauseResumeCommand.RaiseCanExecuteChanged();
+        RefreshDevicesCommand.RaiseCanExecuteChanged();
+        BrowseOutputCommand.RaiseCanExecuteChanged();
+    }
+
+    private void RunOnUi(Action action)
+    {
+        if (SynchronizationContext.Current == _uiContext) action();
+        else _uiContext.Post(_ => action(), null);
+    }
+
+    private void RunOnUi(Func<Task> action) => _uiContext.Post(async _ => await action(), null);
+
+    private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> values)
+    {
+        target.Clear();
+        foreach (var value in values) target.Add(value);
+    }
+
+    private static string FormatDuration(TimeSpan value) =>
+        value.TotalHours >= 1 ? value.ToString(@"hh\:mm\:ss") : value.ToString(@"mm\:ss");
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / (1024d * 1024 * 1024):0.00} GB",
+        >= 1024L * 1024 => $"{bytes / (1024d * 1024):0.0} MB",
+        >= 1024L => $"{bytes / 1024d:0.0} KB",
+        _ => $"{bytes} B"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _recordingService.StateChanged -= OnRecordingStateChanged;
+        _recordingService.ProgressChanged -= OnRecordingProgressChanged;
+        _recordingService.PreviewFrameAvailable -= OnPreviewFrameAvailable;
+        _recordingService.RecordingCompleted -= OnRecordingCompleted;
+        await _recordingService.DisposeAsync();
+        _disposed = true;
+    }
+}
