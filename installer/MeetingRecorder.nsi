@@ -6,13 +6,16 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.1.0"
+  !define VERSION "1.1.1"
 !endif
 !ifndef APP_FILES
   !error "APP_FILES 未定义"
 !endif
 !ifndef VC_REDIST
   !error "VC_REDIST 未定义"
+!endif
+!ifndef APP_ICON
+  !error "APP_ICON 未定义"
 !endif
 !ifndef OUTPUT_FILE
   !define OUTPUT_FILE "MeetingRecorder-Setup.exe"
@@ -35,8 +38,8 @@ VIAddVersionKey /LANG=2052 "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "MeetingRecorder contributors"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
-!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+!define MUI_ICON "${APP_ICON}"
+!define MUI_UNICON "${APP_ICON}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${APP_FILES}\THIRD-PARTY-NOTICES.txt"
 !insertmacro MUI_PAGE_COMPONENTS
@@ -81,16 +84,17 @@ Section "MeetingRecorder（必需）" SEC_MAIN
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "Publisher" "MeetingRecorder contributors"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "DisplayIcon" "$INSTDIR\MeetingRecorder.exe,0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MeetingRecorder" "NoRepair" 1
   CreateDirectory "$SMPROGRAMS\MeetingRecorder"
-  CreateShortcut "$SMPROGRAMS\MeetingRecorder\MeetingRecorder.lnk" "$INSTDIR\MeetingRecorder.exe"
-  CreateShortcut "$SMPROGRAMS\MeetingRecorder\卸载 MeetingRecorder.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\MeetingRecorder\MeetingRecorder.lnk" "$INSTDIR\MeetingRecorder.exe" "" "$INSTDIR\MeetingRecorder.exe" 0
+  CreateShortcut "$SMPROGRAMS\MeetingRecorder\卸载 MeetingRecorder.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
 SectionEnd
 
 Section /o "桌面快捷方式" SEC_DESKTOP
-  CreateShortcut "$DESKTOP\MeetingRecorder.lnk" "$INSTDIR\MeetingRecorder.exe"
+  CreateShortcut "$DESKTOP\MeetingRecorder.lnk" "$INSTDIR\MeetingRecorder.exe" "" "$INSTDIR\MeetingRecorder.exe" 0
 SectionEnd
 
 LangString DESC_SEC_MAIN ${LANG_SIMPCHINESE} "安装 MeetingRecorder、自包含 .NET 10 运行时和 VC++ 运行库。"

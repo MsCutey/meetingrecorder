@@ -1,4 +1,4 @@
-# MeetingRecorder V1.1.0
+# MeetingRecorder V1.1.1
 
 MeetingRecorder 是面向 Windows 10/11 x64 的本地会议录屏软件。它不接入会议平台接口，也不会上传录制内容。
 
@@ -17,6 +17,13 @@ MeetingRecorder 是面向 Windows 10/11 x64 的本地会议录屏软件。它不
 - `.partial` 写入、原子 JSON、异常会话扫描和恢复入口。
 
 > 录制会议前，请取得所有必要授权并遵守适用法律、单位制度和会议平台规则。本软件不绕过 DRM、安全桌面或平台限制。
+
+## V1.1.1 软件图标
+
+- 使用 MeetingRecorder 麦克风录制图标替代系统默认图标，并提供 16–256 像素的九种 Windows 图标尺寸。
+- 主窗口、授权窗口、页面品牌区、任务栏和系统托盘使用同一图标。
+- 主程序、安装器、卸载器、开始菜单、桌面快捷方式及“已安装的应用”列表均显示产品图标。
+- 图标读取失败时托盘安全回退到系统图标，不影响主界面启动或录制功能。
 
 ## V1.1.0 稳定性架构
 
@@ -60,7 +67,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 便携版已内置 .NET 运行时。首次在未安装 VC++ 运行库的电脑上使用时，请先运行压缩包内
 `prerequisites\vc_redist.x64.exe`，安装成功后再启动 `MeetingRecorder.exe`。
 
-详细验证步骤见 [V1.1.0 验收清单](docs/ACCEPTANCE.md)。
+详细验证步骤见 [V1.1.1 验收清单](docs/ACCEPTANCE.md)。
 
 ## 当前边界
 

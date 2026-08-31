@@ -1,4 +1,4 @@
-# MeetingRecorder V1.1.0 验收清单
+# MeetingRecorder V1.1.1 验收清单
 
 ## 自动化检查
 
@@ -17,6 +17,7 @@ dotnet test tests/MeetingRecorder.Tests/MeetingRecorder.Tests.csproj -c Release 
 - 双路视频关闭逐样本强制单声道复制、启用低延迟但保持节流保护；仅系统声视频采用保守增益。
 - 开发构建按调用方的 Release/Debug 配置选择对应 Worker，避免误启动旧引擎。
 - 音频异常恢复优先选择 `.recovery.partial.mp3`；兼容音频路径保留分段 `.partial.m4a`，并兼容 V1.0.0 的恢复 MP4。
+- 应用 ICO 包含 16、20、24、32、40、48、64、128、256 像素九种尺寸；主程序和安装器应能提取出相同产品图标。
 
 ## 当前电脑真实设备冒烟
 
@@ -57,6 +58,7 @@ powershell -File scripts/verify-media.ps1 -VideoFile "D:\Recordings\sample.mp4" 
 6. 用户手动最小化或关闭，确认进入托盘；托盘和热键启动不弹窗、不抢焦点。
 7. 每次停止后确认主界面仍存活、历史记录正确、没有遗留 Worker。
 8. 强制结束 Worker，确认主界面进入“录制失败”，显示退出码与恢复入口，防捕获已撤销并可继续刷新设备。
+9. 确认主窗口、任务栏、托盘、安装器、开始菜单、桌面快捷方式和“已安装的应用”均显示 MeetingRecorder 产品图标。
 
 声音组合需要用不同的人声/提示音人工确认双路均可辨认；自动化只能验证轨道和文件结构。
 

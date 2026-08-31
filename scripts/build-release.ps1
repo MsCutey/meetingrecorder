@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $Version = "1.1.0",
+    [string] $Version = "1.1.1",
     [string] $DotNet = "dotnet",
     [string] $MakeNsis = "makensis",
     [switch] $SkipInstaller
@@ -27,6 +27,10 @@ $portableDirectory = Join-Path $artifactsRoot "MeetingRecorder-portable-win-x64"
 $portableZip = Join-Path $artifactsRoot "MeetingRecorder-$Version-portable-win-x64.zip"
 $installerOutput = Join-Path $artifactsRoot "MeetingRecorder-$Version-Setup-win-x64.exe"
 $vcRedist = Join-Path $repositoryRoot "installer\prerequisites\vc_redist.x64.exe"
+$appIcon = Join-Path $repositoryRoot "src\MeetingRecorder.App\Assets\MeetingRecorder.ico"
+if (-not (Test-Path -LiteralPath $appIcon)) {
+    throw "缺少应用图标 src\MeetingRecorder.App\Assets\MeetingRecorder.ico，无法生成正式发布包。"
+}
 if (-not (Test-Path -LiteralPath $vcRedist)) {
     throw "正式发布必须包含 installer\prerequisites\vc_redist.x64.exe。请从微软官方下载 x64 安装程序后重试。"
 }
@@ -63,12 +67,23 @@ Compress-Archive -Path (Join-Path $portableDirectory "*") -DestinationPath $port
 
 if (-not $SkipInstaller) {
     $makeNsisCommand = Get-Command $MakeNsis -ErrorAction SilentlyContinue
+    if ($null -eq $makeNsisCommand -and $MakeNsis -eq "makensis") {
+        $nsisRoots = @(${env:ProgramFiles(x86)}, $env:ProgramFiles) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        foreach ($nsisRoot in $nsisRoots) {
+            $candidate = Join-Path $nsisRoot "NSIS\makensis.exe"
+            if (Test-Path -LiteralPath $candidate) {
+                $makeNsisCommand = Get-Command $candidate
+                break
+            }
+        }
+    }
     if ($null -eq $makeNsisCommand) {
         throw "未找到 makensis，无法生成正式安装包。若只需要便携包，请显式传入 -SkipInstaller。"
     }
     else {
         $script = Join-Path $repositoryRoot "installer\MeetingRecorder.nsi"
-        & $makeNsisCommand.Source "/INPUTCHARSET" "UTF8" "/DVERSION=$Version" "/DAPP_FILES=$installedDirectory" "/DVC_REDIST=$vcRedist" "/DOUTPUT_FILE=$installerOutput" $script
+        & $makeNsisCommand.Source "/INPUTCHARSET" "UTF8" "/DVERSION=$Version" "/DAPP_FILES=$installedDirectory" "/DVC_REDIST=$vcRedist" "/DAPP_ICON=$appIcon" "/DOUTPUT_FILE=$installerOutput" $script
         if ($LASTEXITCODE -ne 0) { throw "NSIS 安装包生成失败。" }
     }
 }

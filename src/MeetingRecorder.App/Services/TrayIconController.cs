@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using WinForms = System.Windows.Forms;
 
 namespace MeetingRecorder.App.Services;
@@ -6,6 +7,7 @@ namespace MeetingRecorder.App.Services;
 public sealed class TrayIconController : IDisposable
 {
     private readonly WinForms.NotifyIcon _notifyIcon;
+    private readonly Icon? _applicationIcon;
 
     public TrayIconController(Action show, Func<Task> startStop, Func<Task> pauseResume, Func<Task> exit)
     {
@@ -17,10 +19,11 @@ public sealed class TrayIconController : IDisposable
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("退出", null, async (_, _) => await exit());
 
+        _applicationIcon = LoadApplicationIcon();
         _notifyIcon = new WinForms.NotifyIcon
         {
             Text = "MeetingRecorder 会议录屏",
-            Icon = SystemIcons.Application,
+            Icon = _applicationIcon ?? SystemIcons.Application,
             ContextMenuStrip = menu,
             Visible = true
         };
@@ -39,5 +42,25 @@ public sealed class TrayIconController : IDisposable
     {
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _applicationIcon?.Dispose();
+    }
+
+    private static Icon? LoadApplicationIcon()
+    {
+        var executablePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Icon.ExtractAssociatedIcon(executablePath);
+        }
+        catch
+        {
+            // 图标不是核心功能；读取失败时保留系统图标，不能影响主界面启动。
+            return null;
+        }
     }
 }

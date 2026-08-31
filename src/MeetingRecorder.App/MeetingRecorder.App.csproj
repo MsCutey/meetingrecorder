@@ -6,9 +6,14 @@
     <AssemblyName>MeetingRecorder</AssemblyName>
     <RootNamespace>MeetingRecorder.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\MeetingRecorder.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MeetingRecorder.Core\MeetingRecorder.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\MeetingRecorder.ico" />
+    <Resource Include="Assets\MeetingRecorder.png" />
   </ItemGroup>
 </Project>
