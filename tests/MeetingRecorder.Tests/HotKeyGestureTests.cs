@@ -25,6 +25,38 @@ public sealed class HotKeyGestureTests
         Assert.Throws<InvalidDataException>(settings.Validate);
     }
 
+    [Fact]
+    public void MicToggleConflictingWithOtherHotKeys_AreRejected()
+    {
+        var conflictsWithStartStop = new AppSettings
+        {
+            StartStopHotKey = "Ctrl+Shift+F9",
+            PauseResumeHotKey = "Ctrl+Shift+F10",
+            MicToggleHotKey = "Ctrl+Shift+F9"
+        };
+        Assert.Throws<InvalidDataException>(conflictsWithStartStop.Validate);
+
+        var conflictsWithPauseResume = new AppSettings
+        {
+            StartStopHotKey = "Ctrl+Shift+F9",
+            PauseResumeHotKey = "Ctrl+Shift+F10",
+            MicToggleHotKey = "Ctrl+Shift+F10"
+        };
+        Assert.Throws<InvalidDataException>(conflictsWithPauseResume.Validate);
+    }
+
+    [Fact]
+    public void ThreeDistinctHotKeys_AreAccepted()
+    {
+        var settings = new AppSettings
+        {
+            StartStopHotKey = "Ctrl+Shift+F9",
+            PauseResumeHotKey = "Ctrl+Shift+F10",
+            MicToggleHotKey = "Ctrl+Shift+F11"
+        };
+        settings.Validate();
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("F9")]

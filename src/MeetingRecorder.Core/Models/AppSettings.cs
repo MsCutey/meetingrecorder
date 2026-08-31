@@ -4,7 +4,7 @@ namespace MeetingRecorder.Core.Models;
 
 public sealed record AppSettings
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public string OutputDirectory { get; init; } = DefaultOutputDirectory();
@@ -17,6 +17,8 @@ public sealed record AppSettings
     public int CountdownSeconds { get; init; } = 3;
     public string StartStopHotKey { get; init; } = "Ctrl+Shift+F9";
     public string PauseResumeHotKey { get; init; } = "Ctrl+Shift+F10";
+    public string MicToggleHotKey { get; init; } = "Ctrl+Shift+F11";
+    public bool StartMicrophoneMuted { get; init; }
     public bool MinimizeToTray { get; init; } = true;
     public bool HasAcceptedRecordingNotice { get; init; }
     public bool ExcludeMainWindowFromDisplayCapture { get; init; }
@@ -49,9 +51,10 @@ public sealed record AppSettings
 
         var startStop = HotKeyGesture.Parse(StartStopHotKey);
         var pauseResume = HotKeyGesture.Parse(PauseResumeHotKey);
-        if (startStop == pauseResume)
+        var micToggle = HotKeyGesture.Parse(MicToggleHotKey);
+        if (startStop == pauseResume || startStop == micToggle || pauseResume == micToggle)
         {
-            throw new InvalidDataException("开始/停止与暂停/恢复热键不能相同。");
+            throw new InvalidDataException("三个全局热键必须互不相同。");
         }
 
         if (string.IsNullOrWhiteSpace(OutputDirectory))

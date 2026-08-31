@@ -122,6 +122,8 @@ public sealed class ResilientAudioOnlyRecordingEngineTests
             return Task.CompletedTask;
         }
 
+        public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public Task<TimeSpan> StopAsync(CancellationToken cancellationToken = default)
         {
             StopCount++;

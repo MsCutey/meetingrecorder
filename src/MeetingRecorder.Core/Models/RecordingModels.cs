@@ -72,6 +72,7 @@ public sealed record RecordingRequest
     public bool PreferHardwareEncoding { get; init; } = true;
     public bool ExcludeMainWindowFromDisplayCapture { get; init; }
     public bool PreviewEnabled { get; init; } = true;
+    public bool StartMicrophoneMuted { get; init; }
 }
 
 public sealed record RecordingProgress(

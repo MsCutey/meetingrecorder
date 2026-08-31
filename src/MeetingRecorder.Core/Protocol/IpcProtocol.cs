@@ -22,6 +22,7 @@ public static class IpcMessageTypes
     public const string Started = "started";
     public const string Pause = "pause";
     public const string Resume = "resume";
+    public const string Microphone = "microphone";
     public const string Stop = "stop";
     public const string State = "state";
     public const string Progress = "progress";

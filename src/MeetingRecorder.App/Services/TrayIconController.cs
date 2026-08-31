@@ -7,15 +7,29 @@ namespace MeetingRecorder.App.Services;
 public sealed class TrayIconController : IDisposable
 {
     private readonly WinForms.NotifyIcon _notifyIcon;
+    private readonly WinForms.ToolStripMenuItem _microphoneItem;
+    private readonly Func<bool> _isMicrophoneLive;
     private readonly Icon? _applicationIcon;
 
-    public TrayIconController(Action show, Func<Task> startStop, Func<Task> pauseResume, Func<Task> exit)
+    public TrayIconController(
+        Action show,
+        Func<Task> startStop,
+        Func<Task> pauseResume,
+        Func<Task> toggleMicrophone,
+        Func<bool> isMicrophoneLive,
+        Func<Task> exit)
     {
+        _isMicrophoneLive = isMicrophoneLive;
         var menu = new WinForms.ContextMenuStrip();
         menu.Items.Add("显示主界面", null, (_, _) => show());
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("开始 / 停止录制", null, async (_, _) => await startStop());
         menu.Items.Add("暂停 / 恢复", null, async (_, _) => await pauseResume());
+        _microphoneItem = (WinForms.ToolStripMenuItem)menu.Items.Add("麦克风：开/关", null, async (_, _) => await toggleMicrophone());
+        menu.Opening += (_, _) =>
+        {
+            _microphoneItem.Text = _isMicrophoneLive() ? "麦克风：开（点击关闭）" : "麦克风：关（点击开启）";
+        };
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("退出", null, async (_, _) => await exit());
 

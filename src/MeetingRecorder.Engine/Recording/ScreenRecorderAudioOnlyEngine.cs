@@ -26,6 +26,7 @@ public sealed class ScreenRecorderAudioOnlyEngine : IRecordingEngine
     private Recorder? _recorder;
     private DisplayRecordingSource? _source;
     private Exception? _failure;
+    private volatile bool _microphoneMuted;
     private bool _isStarted;
     private bool _stopRequested;
     private bool _isStopped;
@@ -46,7 +47,7 @@ public sealed class ScreenRecorderAudioOnlyEngine : IRecordingEngine
 
     public TimeSpan Elapsed => _clock.Elapsed;
     public double SystemAudioLevel => _systemPeak?.ReadPeak() ?? 0;
-    public double MicrophoneLevel => _microphonePeak?.ReadPeak() ?? 0;
+    public double MicrophoneLevel => _microphoneMuted ? 0 : _microphonePeak?.ReadPeak() ?? 0;
     public string? Warning => "正在使用兼容音频引擎；异常中断时将从分段 M4A 临时文件恢复。";
 
     public event EventHandler<PreviewFrameEventArgs>? PreviewFrameAvailable;
@@ -70,6 +71,7 @@ public sealed class ScreenRecorderAudioOnlyEngine : IRecordingEngine
             _recorder.OnRecordingFailed += OnRecordingFailed;
             _recorder.Record(_request.PartialPath);
             await _started.Task.WaitAsync(TimeSpan.FromSeconds(18), cancellationToken).ConfigureAwait(false);
+            ApplyMicrophoneInitialMute();
             _clock.Start();
             _isStarted = true;
         }
@@ -98,6 +100,39 @@ public sealed class ScreenRecorderAudioOnlyEngine : IRecordingEngine
             _clock.Resume();
         }
         finally { _operationGate.Release(); }
+    }
+
+    public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureActive();
+        if (!_request.CaptureMicrophone) throw new InvalidOperationException("本次录制未启用麦克风。");
+        cancellationToken.ThrowIfCancellationRequested();
+        SetMicrophoneMutedNative(!enabled);
+        _microphoneMuted = !enabled;
+        return Task.CompletedTask;
+    }
+
+    private void ApplyMicrophoneInitialMute()
+    {
+        if (!_request.CaptureMicrophone || !_request.StartMicrophoneMuted) return;
+        try
+        {
+            SetMicrophoneMutedNative(true);
+            _microphoneMuted = true;
+        }
+        catch
+        {
+            // 初始静音失败不阻断录制；用户仍可手动切换麦克风。
+        }
+    }
+
+    private void SetMicrophoneMutedNative(bool muted)
+    {
+        var applied = _recorder!.GetDynamicOptionsBuilder()
+            .SetDynamicAudioOptions(new DynamicAudioOptions { IsInputDeviceEnabled = !muted })
+            .Apply();
+        if (!applied) throw new InvalidOperationException("原生录制引擎拒绝了麦克风开关请求，状态保持不变。");
     }
 
     public async Task<TimeSpan> StopAsync(CancellationToken cancellationToken = default)

@@ -173,6 +173,12 @@
                   <ComboBox ItemsSource="{Binding CountdownChoices}" SelectedItem="{Binding CountdownSeconds}" />
                 </StackPanel>
               </Grid>
+              <Grid Margin="0,12,0,0">
+                <StackPanel>
+                  <TextBlock Text="麦克风开关" Foreground="#475467" FontSize="12" Margin="0,0,0,5" />
+                  <TextBox Text="{Binding MicToggleHotKey, UpdateSourceTrigger=LostFocus}" />
+                </StackPanel>
+              </Grid>
               <TextBlock Text="{Binding StorageModeText}" Foreground="#98A2B3" FontSize="11" Margin="0,11,0,0" />
             </StackPanel>
           </Border>
@@ -254,6 +260,9 @@
           <TextBlock Text="录制状态始终清晰显示。请在录制前取得所有参会者授权。" Foreground="#667085" FontSize="12" Margin="0,5,0,0" />
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Content="{Binding MicToggleButtonText}" Margin="0,0,10,0" Style="{StaticResource SoftButtonStyle}" Padding="14,13"
+                  Command="{Binding MicToggleCommand}"
+                  ToolTip="录制中随时开关麦克风；未启用麦克风的录制不可切换" />
           <Button Content="{Binding PauseButtonText}" Margin="0,0,10,0" Style="{StaticResource SoftButtonStyle}" Padding="22,13" Command="{Binding PauseResumeCommand}" />
           <Button Content="{Binding PrimaryButtonText}" Style="{StaticResource PrimaryButtonStyle}" Command="{Binding PrimaryCommand}" MinWidth="170" />
         </StackPanel>

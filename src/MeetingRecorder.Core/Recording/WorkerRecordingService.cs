@@ -189,6 +189,29 @@ public sealed class WorkerRecordingService : IRecordingService
         finally { _operationGate.Release(); }
     }
 
+    public async Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (State is not (RecordingState.Recording or RecordingState.Paused) || _worker is null)
+            {
+                throw new InvalidOperationException("当前没有进行中的录制。");
+            }
+            if (_request is not { CaptureMicrophone: true })
+            {
+                throw new InvalidOperationException("本次录制未启用麦克风，无法切换。");
+            }
+            var effective = await _worker.ToggleMicrophoneAsync(enabled, _timeouts.Command, cancellationToken).ConfigureAwait(false);
+            _logger.Info("microphone-toggle", $"session={_activeSession?.Id}; requested={enabled}; effective={effective}");
+            if (effective != enabled)
+            {
+                throw new InvalidOperationException("麦克风开关未生效：录制引擎拒绝了该请求。");
+            }
+        }
+        finally { _operationGate.Release(); }
+    }
+
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (State == RecordingState.Countdown)
@@ -330,6 +353,7 @@ public sealed class WorkerRecordingService : IRecordingService
                 RecoveryMediaPath = _recoveryMediaPath,
                 UseHardwareEncoding = useHardware,
                 EnablePreview = _enablePreview,
+                StartMicrophoneMuted = request.CaptureMicrophone && request.StartMicrophoneMuted,
                 EngineLogPath = Path.Combine(_repository.Paths.LogsDirectory, "engine-native.log")
             };
             await worker.SendAsync(IpcControlMessage.Create(IpcMessageTypes.Start, payload), startupTimeout.Token).ConfigureAwait(false);

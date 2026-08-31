@@ -20,9 +20,12 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private readonly AudioEndpointPeakReader? _microphonePeak;
     private Recorder? _recorder;
     private RecordingSourceBase? _source;
+    private ScreenRect? _sourceCrop;
     private TaskCompletionSource _started = NewSignal();
     private TaskCompletionSource _completed = NewSignal();
     private Exception? _failure;
+    private string? _fallbackWarning;
+    private volatile bool _microphoneMuted;
     private long _lastPreviewTimestamp;
     private bool _isStarted;
     private bool _stopRequested;
@@ -44,8 +47,8 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
 
     public TimeSpan Elapsed => _clock.Elapsed;
     public double SystemAudioLevel => _systemPeak?.ReadPeak() ?? 0;
-    public double MicrophoneLevel => _microphonePeak?.ReadPeak() ?? 0;
-    public string? Warning => GetCaptureTargetWarning();
+    public double MicrophoneLevel => _microphoneMuted ? 0 : _microphonePeak?.ReadPeak() ?? 0;
+    public string? Warning => CombineWarnings(GetCaptureTargetWarning(), _fallbackWarning);
 
     public event EventHandler<PreviewFrameEventArgs>? PreviewFrameAvailable;
     public event EventHandler<EngineFaultEventArgs>? Faulted;
@@ -57,25 +60,190 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         try
         {
             if (_isStarted) throw new InvalidOperationException("录制引擎已经启动。");
-            _source = CreateRecordingSource(_request);
-            _recorder = Recorder.CreateRecorder(CreateRecorderOptions(_source));
-            if (_request.EnablePreview) _recorder.OnFrameRecorded += OnPreviewFrameRecorded;
-            _recorder.OnStatusChanged += OnRecorderStatusChanged;
-            _recorder.OnRecordingComplete += OnRecorderComplete;
-            _recorder.OnRecordingFailed += OnRecorderFailed;
-            try
-            {
-                _recorder.Record(_request.PartialPath);
-                await _started.Task.WaitAsync(TimeSpan.FromSeconds(18), cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception error) when (_request.UseHardwareEncoding && error is not OperationCanceledException)
-            {
-                throw new HardwareEncoderUnavailableException("硬件 H.264 编码器初始化失败。", error);
-            }
+            await StartVideoCaptureAsync(cancellationToken).ConfigureAwait(false);
+            ApplyMicrophoneInitialMute();
             _clock.Start();
             _isStarted = true;
         }
         finally { _operationGate.Release(); }
+    }
+
+    private async Task StartVideoCaptureAsync(CancellationToken cancellationToken)
+    {
+        var target = _request.CaptureTarget ?? throw new InvalidOperationException("视频模式必须选择显示器或窗口。");
+        var lastFailure = default(Exception);
+
+        if (target.Kind == CaptureTargetKind.Window)
+        {
+            var handle = new nint(target.NativeHandle);
+            if (!IsWindow(handle)) throw new WindowCaptureUnavailableException("所选窗口已关闭，无法开始窗口录制。请刷新画面来源后重试。");
+            if (IsIconic(handle)) throw new WindowCaptureUnavailableException("所选窗口已最小化，请先恢复窗口再开始录制。");
+
+            try
+            {
+                await StartRecorderAsync(CreateRecordingSource(_request), null, requireFrames: true, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                lastFailure = error;
+            }
+
+            var fallback = TryCreateDisplayFallback(handle);
+            if (fallback is not null)
+            {
+                try
+                {
+                    await StartRecorderAsync(fallback.Value.Source, fallback.Value.Crop, requireFrames: false, cancellationToken).ConfigureAwait(false);
+                    _fallbackWarning = "窗口捕获不可用，已自动改为录制该窗口所在显示器区域；画面中可能包含同屏的其他内容。";
+                    return;
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    lastFailure = error;
+                }
+
+                try
+                {
+                    await StartRecorderAsync(fallback.Value.FullDisplaySource, null, requireFrames: false, cancellationToken).ConfigureAwait(false);
+                    _fallbackWarning = "窗口与显示器区域捕获均不可用，已自动改为录制整个显示器。";
+                    return;
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    lastFailure = error;
+                }
+            }
+
+            throw new WindowCaptureUnavailableException(
+                $"窗口录制不可用：{(fallback is null ? "已尝试窗口捕获" : "已尝试窗口捕获与显示器区域捕获")}（原生错误：{DescribeNativeError(lastFailure)}）。请改为录制整个显示器。",
+                lastFailure);
+        }
+
+        try
+        {
+            await StartRecorderAsync(CreateRecordingSource(_request), null, requireFrames: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (_request.UseHardwareEncoding && error is not OperationCanceledException)
+        {
+            throw new HardwareEncoderUnavailableException("硬件 H.264 编码器初始化失败。", error);
+        }
+    }
+
+    private async Task StartRecorderAsync(RecordingSourceBase source, ScreenRect? crop, bool requireFrames, CancellationToken cancellationToken)
+    {
+        DisposeFailedRecorder();
+        _source = source;
+        _sourceCrop = crop;
+        _started = NewSignal();
+        _completed = NewSignal();
+        _failure = null;
+        _recorder = Recorder.CreateRecorder(CreateRecorderOptions(source));
+        if (_request.EnablePreview) _recorder.OnFrameRecorded += OnPreviewFrameRecorded;
+        _recorder.OnStatusChanged += OnRecorderStatusChanged;
+        _recorder.OnRecordingComplete += OnRecorderComplete;
+        _recorder.OnRecordingFailed += OnRecorderFailed;
+        try
+        {
+            _recorder.Record(_request.PartialPath);
+            await _started.Task.WaitAsync(TimeSpan.FromSeconds(18), cancellationToken).ConfigureAwait(false);
+            await VerifyCaptureHealthAsync(requireFrames, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            DisposeFailedRecorder();
+            DeletePartialOutput();
+            throw;
+        }
+    }
+
+    private async Task VerifyCaptureHealthAsync(bool requireFrames, CancellationToken cancellationToken)
+    {
+        var window = requireFrames ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(500);
+        var deadline = Stopwatch.GetTimestamp() + window.Ticks;
+        var initialFrame = _recorder!.CurrentFrameNumber;
+        while (Stopwatch.GetTimestamp() < deadline)
+        {
+            var failure = Volatile.Read(ref _failure);
+            if (failure is not null) throw failure;
+            if (requireFrames && _recorder.CurrentFrameNumber > initialFrame) return;
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+        var lateFailure = Volatile.Read(ref _failure);
+        if (lateFailure is not null) throw lateFailure;
+        if (requireFrames)
+        {
+            throw new WindowCaptureUnavailableException("录制引擎已启动但 2 秒内未产生任何视频帧，判定当前捕获源不可用。");
+        }
+    }
+
+    private void DisposeFailedRecorder()
+    {
+        if (_recorder is not null)
+        {
+            if (_request.EnablePreview) _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
+            _recorder.OnStatusChanged -= OnRecorderStatusChanged;
+            _recorder.OnRecordingComplete -= OnRecorderComplete;
+            _recorder.OnRecordingFailed -= OnRecorderFailed;
+            _recorder.Dispose();
+            _recorder = null;
+        }
+        _source?.Dispose();
+        _source = null;
+        _sourceCrop = null;
+    }
+
+    private void DeletePartialOutput()
+    {
+        try { if (File.Exists(_request.PartialPath)) File.Delete(_request.PartialPath); }
+        catch { }
+    }
+
+    private static string DescribeNativeError(Exception? error)
+    {
+        if (error is null) return "未知";
+        var message = error.Message.TrimEnd('。', '.');
+        return message == "参数错误" ? "参数错误 0x80070057" : message;
+    }
+
+    private static string? CombineWarnings(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first)) return second;
+        if (string.IsNullOrWhiteSpace(second)) return first;
+        return $"{first} {second}";
+    }
+
+    private void ApplyMicrophoneInitialMute()
+    {
+        if (!_request.CaptureMicrophone || !_request.StartMicrophoneMuted) return;
+        try
+        {
+            SetMicrophoneMutedNative(true);
+            _microphoneMuted = true;
+        }
+        catch
+        {
+            // 初始静音失败不阻断录制；用户仍可手动切换麦克风。
+        }
+    }
+
+    public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_isStarted || _isStopped || _recorder is null) throw new InvalidOperationException("录制引擎当前不可操作。");
+        if (!_request.CaptureMicrophone) throw new InvalidOperationException("本次录制未启用麦克风。");
+        cancellationToken.ThrowIfCancellationRequested();
+        SetMicrophoneMutedNative(!enabled);
+        _microphoneMuted = !enabled;
+        return Task.CompletedTask;
+    }
+
+    private void SetMicrophoneMutedNative(bool muted)
+    {
+        var applied = _recorder!.GetDynamicOptionsBuilder()
+            .SetDynamicAudioOptions(new DynamicAudioOptions { IsInputDeviceEnabled = !muted })
+            .Apply();
+        if (!applied) throw new InvalidOperationException("原生录制引擎拒绝了麦克风开关请求，状态保持不变。");
     }
 
     public async Task PauseAsync(CancellationToken cancellationToken = default)
@@ -126,7 +294,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private RecorderOptions CreateRecorderOptions(RecordingSourceBase source) => new()
     {
         SourceOptions = new SourceOptions { RecordingSources = [source] },
-        OutputOptions = CreateOutputOptions(_request),
+        OutputOptions = CreateOutputOptions(_request, _sourceCrop),
         VideoEncoderOptions = CreateVideoEncoderOptions(_request),
         AudioOptions = CreateAudioOptions(_request),
         LogOptions = new LogOptions
@@ -137,12 +305,13 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
     };
 
-    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request) => new()
+    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request, ScreenRect? sourceCrop = null) => new()
     {
         RecorderMode = RecorderMode.Video,
         OutputFrameSize = GetOutputSize(request),
         Stretch = StretchMode.Uniform,
         IsVideoCaptureEnabled = true,
+        SourceRect = sourceCrop,
         // 只在主程序明确允许时生成缩小预览；源预览始终关闭。
         IsVideoFramePreviewEnabled = request.EnablePreview,
         VideoFramePreviewSize = PreviewSize
@@ -170,6 +339,46 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
             IsVideoFramePreviewEnabled = false,
             Stretch = StretchMode.Uniform
         };
+    }
+
+    private (RecordingSourceBase Source, ScreenRect? Crop, RecordingSourceBase FullDisplaySource)? TryCreateDisplayFallback(nint windowHandle)
+    {
+        try
+        {
+            if (!GetWindowRect(windowHandle, out var windowRect)) return null;
+            var monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+            if (monitor == nint.Zero) return null;
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(monitor, ref info)) return null;
+
+            var deviceName = info.DeviceName;
+            if (string.IsNullOrWhiteSpace(deviceName) || !deviceName.StartsWith(@"\\.\", StringComparison.Ordinal)) return null;
+
+            var crop = WindowCaptureFallback.ComputeDisplayCrop(
+                windowRect.Left, windowRect.Top, windowRect.Right, windowRect.Bottom,
+                info.Monitor.Left, info.Monitor.Top, info.Monitor.Right, info.Monitor.Bottom);
+
+            RecordingSourceBase CreateDisplaySource() => new DisplayRecordingSource(deviceName)
+            {
+                IsCursorCaptureEnabled = true,
+                IsBorderRequired = false,
+                IsVideoCaptureEnabled = true,
+                IsVideoFramePreviewEnabled = false,
+                Stretch = StretchMode.Uniform
+            };
+
+            if (crop is null)
+            {
+                return (CreateDisplaySource(), null, CreateDisplaySource());
+            }
+
+            var rect = new ScreenRect(crop.Left, crop.Top, crop.Width, crop.Height);
+            return (CreateDisplaySource(), rect, CreateDisplaySource());
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     internal static VideoEncoderOptions CreateVideoEncoderOptions(WorkerRecordingRequest request) => new()
@@ -296,4 +505,38 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsIconic(nint windowHandle);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(nint windowHandle, out Rect rect);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint MonitorFromWindow(nint windowHandle, uint flags);
+
+    // LibraryImport 源生成不支持含定长字符串的结构体封送，此调用沿用经典 DllImport。
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(nint monitorHandle, ref MonitorInfo monitorInfo);
+
+    private const uint MonitorDefaultToNearest = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public Rect Monitor;
+        public Rect WorkArea;
+        public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+    }
 }

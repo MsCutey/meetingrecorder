@@ -79,4 +79,36 @@ public sealed class IpcProtocolTests
 
         await Assert.ThrowsAsync<InvalidDataException>(async () => await PipeFrameCodec.ReadAsync(stream));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MicrophoneToggle_RoundTripsEnabledFlag(bool enabled)
+    {
+        await using var stream = new MemoryStream();
+        var expected = IpcControlMessage.Create(IpcMessageTypes.Microphone, new WorkerMicrophoneUpdate(enabled), "mic-1");
+        await PipeFrameCodec.WriteControlAsync(stream, expected);
+        stream.Position = 0;
+
+        var frame = Assert.IsType<IpcControlFrame>(await PipeFrameCodec.ReadAsync(stream));
+        Assert.Equal(IpcMessageTypes.Microphone, frame.Message.Type);
+        Assert.Equal("mic-1", frame.Message.RequestId);
+        Assert.Equal(enabled, frame.Message.ReadPayload<WorkerMicrophoneUpdate>().Enabled);
+    }
+
+    [Fact]
+    public void StartMessage_CarriesMicrophoneMuteIntent()
+    {
+        var request = new WorkerRecordingRequest
+        {
+            SessionId = "session",
+            Mode = RecordingMode.VideoAndAudio,
+            PartialPath = "recording.partial.mp4",
+            EngineLogPath = "engine.log",
+            StartMicrophoneMuted = true
+        };
+        var message = IpcControlMessage.Create(IpcMessageTypes.Start, request);
+
+        Assert.True(message.ReadPayload<WorkerRecordingRequest>().StartMicrophoneMuted);
+    }
 }

@@ -17,5 +17,6 @@ public interface IRecordingService : IAsyncDisposable
     Task StartAsync(RecordingRequest request, CancellationToken cancellationToken = default);
     Task PauseAsync(CancellationToken cancellationToken = default);
     Task ResumeAsync(CancellationToken cancellationToken = default);
+    Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task StopAsync(CancellationToken cancellationToken = default);
 }

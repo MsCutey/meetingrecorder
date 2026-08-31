@@ -13,7 +13,7 @@
       "meetingrecorder.engine": {
         "type": "Project",
         "dependencies": {
-          "MeetingRecorder.Core": "[1.1.2, )",
+          "MeetingRecorder.Core": "[1.1.3, )",
           "NAudio.Wasapi": "[2.2.1, )",
           "ScreenRecorderLib": "[6.6.0, )"
         }
@@ -33,7 +33,6 @@
         "resolved": "6.6.0",
         "contentHash": "u4//jvO39tRXRNqg6/1Ky+KWPmxGdBsJOfp0A1tz6jnJosozzUSYPM0eu3LzeHwZYXeBMJBhVTRLJJBM6CVNng=="
       }
-    },
-    "net10.0-windows10.0.19041/win-x64": {}
+    }
   }
 }

@@ -50,7 +50,7 @@ internal sealed class WorkerApplication(PipeConnection connection, RollingFileLo
             throw new InvalidDataException("录制 Worker 未收到启动请求。");
         }
         var request = control.Message.ReadPayload<WorkerRecordingRequest>();
-        logger.Info("recording-request", $"session={request.SessionId}; mode={request.Mode}; target={request.CaptureTarget?.Kind}; systemAudio={request.CaptureSystemAudio}; microphone={request.CaptureMicrophone}; hardware={request.UseHardwareEncoding}; quality={request.Quality}; preview={request.EnablePreview}");
+        logger.Info("recording-request", $"session={request.SessionId}; mode={request.Mode}; target={request.CaptureTarget?.Kind}; systemAudio={request.CaptureSystemAudio}; microphone={request.CaptureMicrophone}; microphoneMuted={request.StartMicrophoneMuted}; hardware={request.UseHardwareEncoding}; quality={request.Quality}; preview={request.EnablePreview}");
 
         var preflight = WorkerPreflight.Check(request.PartialPath);
         foreach (var issue in preflight.Issues)
@@ -112,6 +112,7 @@ internal sealed class WorkerApplication(PipeConnection connection, RollingFileLo
         await connection.SendAsync(IpcControlMessage.Empty(IpcMessageTypes.Started)).ConfigureAwait(false);
         await SendStateAsync(RecordingState.Recording).ConfigureAwait(false);
         logger.Info("engine-started", $"session={request.SessionId}");
+        var microphoneEnabled = !request.StartMicrophoneMuted;
 
         var automaticStop = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var progressTask = RunProgressLoopAsync(engine, request, automaticStop, lifetime.Token);
@@ -144,6 +145,22 @@ internal sealed class WorkerApplication(PipeConnection connection, RollingFileLo
                         await engine.ResumeAsync().ConfigureAwait(false);
                         await SendStateAsync(RecordingState.Recording).ConfigureAwait(false);
                         break;
+                    case IpcMessageTypes.Microphone:
+                        {
+                            var update = command.Message.ReadPayload<WorkerMicrophoneUpdate>();
+                            try
+                            {
+                                await engine.SetMicrophoneEnabledAsync(update.Enabled).ConfigureAwait(false);
+                                microphoneEnabled = update.Enabled;
+                                logger.Info("microphone-toggle", $"session={request.SessionId}; enabled={update.Enabled}");
+                            }
+                            catch (Exception error)
+                            {
+                                logger.Error("microphone-toggle", "麦克风开关未生效，录制继续。", error);
+                            }
+                            await connection.SendAsync(IpcControlMessage.Create(IpcMessageTypes.Microphone, new WorkerMicrophoneUpdate(microphoneEnabled))).ConfigureAwait(false);
+                            break;
+                        }
                     case IpcMessageTypes.Stop:
                         return await CompleteRecordingAsync(engine, null).ConfigureAwait(false);
                     default:
@@ -184,7 +201,10 @@ internal sealed class WorkerApplication(PipeConnection connection, RollingFileLo
 
     private async Task<int> FailRecordingAsync(IRecordingEngine engine, Exception error, bool attemptStop = true)
     {
-        logger.Error("recording-failed", "录制失败，保留恢复文件。", error);
+        var context = error is InvalidOperationException && error.Message == "参数错误。"
+            ? "（Windows 窗口捕获返回 E_INVALIDARG）"
+            : string.Empty;
+        logger.Error("recording-failed", $"录制失败，保留恢复文件。{context}", error);
         if (attemptStop)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));

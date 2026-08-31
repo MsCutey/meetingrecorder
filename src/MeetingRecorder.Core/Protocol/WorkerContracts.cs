@@ -41,10 +41,12 @@ public sealed record WorkerRecordingRequest
     public string? RecoveryMediaPath { get; init; }
     public bool UseHardwareEncoding { get; init; }
     public bool EnablePreview { get; init; }
+    public bool StartMicrophoneMuted { get; init; }
     public required string EngineLogPath { get; init; }
 }
 
 public sealed record WorkerStateUpdate(RecordingState State);
+public sealed record WorkerMicrophoneUpdate(bool Enabled);
 public sealed record WorkerCompleted(TimeSpan Duration, string? Warning);
 public sealed record WorkerError(WorkerErrorKind Kind, string Message, string? Detail = null);
 

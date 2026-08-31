@@ -52,7 +52,14 @@ public partial class MainWindow : Window
         _hotKeys = new GlobalHotKeyManager(handle);
         _hotKeys.StartStopPressed += async (_, _) => await _viewModel.ExecutePrimaryAsync();
         _hotKeys.PauseResumePressed += async (_, _) => await _viewModel.ExecutePauseResumeAsync();
-        _trayIcon = new TrayIconController(ShowFromTray, _viewModel.ExecutePrimaryAsync, _viewModel.ExecutePauseResumeAsync, ExitAsync);
+        _hotKeys.MicTogglePressed += async (_, _) => await _viewModel.ToggleMicrophoneAsync();
+        _trayIcon = new TrayIconController(
+            ShowFromTray,
+            _viewModel.ExecutePrimaryAsync,
+            _viewModel.ExecutePauseResumeAsync,
+            _viewModel.ToggleMicrophoneAsync,
+            () => _viewModel.IsMicrophoneLive,
+            ExitAsync);
     }
 
     private void OnContentRendered(object? sender, EventArgs eventArgs)
@@ -79,7 +86,7 @@ public partial class MainWindow : Window
         if (_hotKeys is null) return;
         try
         {
-            _hotKeys.Register(_viewModel.StartStopHotKey, _viewModel.PauseResumeHotKey);
+            _hotKeys.Register(_viewModel.StartStopHotKey, _viewModel.PauseResumeHotKey, _viewModel.MicToggleHotKey);
         }
         catch (Exception error)
         {

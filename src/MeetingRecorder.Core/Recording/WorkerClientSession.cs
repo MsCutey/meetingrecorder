@@ -37,6 +37,7 @@ internal sealed class WorkerClientSession : IAsyncDisposable
     public event EventHandler<RecordingState>? StateReceived;
     public event EventHandler<RecordingProgress>? ProgressReceived;
     public event EventHandler<PreviewFrame>? PreviewReceived;
+    public event EventHandler<bool>? MicrophoneStateChanged;
 
     public static async Task<WorkerClientSession> LaunchAsync(
         IWorkerProcessLauncher launcher,
@@ -161,6 +162,27 @@ internal sealed class WorkerClientSession : IAsyncDisposable
         finally { StateReceived -= Handler; }
     }
 
+    public async Task<bool> ToggleMicrophoneAsync(bool requestedEnabled, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var signal = NewSignal<bool>();
+        void Handler(object? _, bool enabled)
+        {
+            signal.TrySetResult(enabled);
+        }
+        MicrophoneStateChanged += Handler;
+        try
+        {
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(timeout);
+            await SendAsync(IpcControlMessage.Create(IpcMessageTypes.Microphone, new WorkerMicrophoneUpdate(requestedEnabled)), timeoutSource.Token).ConfigureAwait(false);
+            var winner = await Task.WhenAny(signal.Task, _error.Task, _exited.Task).WaitAsync(timeoutSource.Token).ConfigureAwait(false);
+            if (winner == signal.Task) return await signal.Task.ConfigureAwait(false);
+            if (winner == _error.Task) throw new WorkerReportedException(await _error.Task.ConfigureAwait(false));
+            throw new WorkerExitedException(await _exited.Task.ConfigureAwait(false));
+        }
+        finally { MicrophoneStateChanged -= Handler; }
+    }
+
     public void Kill()
     {
         try { _process.Kill(); }
@@ -197,6 +219,9 @@ internal sealed class WorkerClientSession : IAsyncDisposable
                         break;
                     case IpcMessageTypes.DiscoveryResult:
                         _discovery.TrySetResult(message.ReadPayload<WorkerDiscoveryResult>());
+                        break;
+                    case IpcMessageTypes.Microphone:
+                        MicrophoneStateChanged?.Invoke(this, message.ReadPayload<WorkerMicrophoneUpdate>().Enabled);
                         break;
                     case IpcMessageTypes.Error:
                         _error.TrySetResult(message.ReadPayload<WorkerError>());

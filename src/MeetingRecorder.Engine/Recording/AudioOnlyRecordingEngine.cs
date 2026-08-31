@@ -33,6 +33,7 @@ public sealed class AudioOnlyRecordingEngine : IRecordingEngine
     private long _framesEmitted;
     private double _systemLevel;
     private double _microphoneLevel;
+    private volatile bool _microphoneMuted;
     private Exception? _failure;
     private volatile bool _paused;
     private bool _started;
@@ -92,6 +93,7 @@ public sealed class AudioOnlyRecordingEngine : IRecordingEngine
             _mp3EncoderTask = Task.Run(() => MediaFoundationEncoder.EncodeToMp3(_mp3Provider, _request.RecoveryMediaPath, 96_000), CancellationToken.None);
             ObserveEncoder(_aacEncoderTask, "AAC/M4A");
             ObserveEncoder(_mp3EncoderTask, "MP3 恢复");
+            _microphoneMuted = _request.StartMicrophoneMuted;
             _clock.Start();
             _pumpCancellation = new CancellationTokenSource();
             _pumpTask = RunPumpAsync(_pumpCancellation.Token);
@@ -138,6 +140,17 @@ public sealed class AudioOnlyRecordingEngine : IRecordingEngine
             _paused = false;
         }
         finally { _operationGate.Release(); }
+    }
+
+    public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureActive();
+        if (_microphoneSource is null) throw new InvalidOperationException("本次录制未启用麦克风。");
+        cancellationToken.ThrowIfCancellationRequested();
+        _microphoneMuted = !enabled;
+        if (!enabled) Volatile.Write(ref _microphoneLevel, 0);
+        return Task.CompletedTask;
     }
 
     public async Task<TimeSpan> StopAsync(CancellationToken cancellationToken = default)
@@ -208,8 +221,9 @@ public sealed class AudioOnlyRecordingEngine : IRecordingEngine
             _microphoneSource?.Read(_microphoneBlock, byteCount);
             if (_systemSource is not null) _systemAudioGain.ProcessInPlace(system);
             Volatile.Write(ref _systemLevel, _systemSource is null ? 0 : PcmLevelMeter.CalculatePeak(system));
-            Volatile.Write(ref _microphoneLevel, _microphoneSource is null ? 0 : PcmLevelMeter.CalculatePeak(microphone));
-            Pcm16StereoMixer.Mix(system, microphone, mixed, _systemSource is not null, _microphoneSource is not null);
+            var microphoneActive = _microphoneSource is not null && !_microphoneMuted;
+            Volatile.Write(ref _microphoneLevel, microphoneActive ? PcmLevelMeter.CalculatePeak(microphone) : 0);
+            Pcm16StereoMixer.Mix(system, microphone, mixed, _systemSource is not null, microphoneActive);
             if (!_aacProvider.TryWrite(mixed) || !_mp3Provider.TryWrite(mixed))
             {
                 throw new AudioBufferOverflowException("音频编码缓冲区已满，已停止录制以防止内存持续增长。");

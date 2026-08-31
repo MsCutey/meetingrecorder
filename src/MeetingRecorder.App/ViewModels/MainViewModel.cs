@@ -28,6 +28,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private int _countdownSeconds = 3;
     private string _startStopHotKey = "Ctrl+Shift+F9";
     private string _pauseResumeHotKey = "Ctrl+Shift+F10";
+    private string _micToggleHotKey = "Ctrl+Shift+F11";
+    private bool _startMicrophoneMuted;
     private RecordingState _state = RecordingState.Idle;
     private string _statusText = "准备就绪";
     private string? _warningText;
@@ -45,6 +47,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _rememberHistoryDeleteChoice;
     private bool _deleteLocalFileWhenDeletingHistory;
     private int _previewUpdatePending;
+    private bool _microphoneToggleAvailable;
+    private bool _microphoneLive = true;
     private readonly HashSet<string> _dismissedRecoveryIds = new(StringComparer.Ordinal);
 
     public MainViewModel(IRecordingService recordingService, IAppRepository repository, IDesktopDialogService dialogs)
@@ -61,6 +65,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         PrimaryCommand = new AsyncRelayCommand(_ => ExecutePrimaryAsync(), _ => State != RecordingState.Finalizing && !IsLoading);
         PauseResumeCommand = new AsyncRelayCommand(_ => ExecutePauseResumeAsync(), _ => State is RecordingState.Recording or RecordingState.Paused);
+        MicToggleCommand = new AsyncRelayCommand(_ => ToggleMicrophoneAsync(), _ => MicrophoneToggleEnabled);
         RefreshDevicesCommand = new AsyncRelayCommand(_ => RefreshDevicesAsync(), _ => IsEditingEnabled && !IsLoading);
         BrowseOutputCommand = new RelayCommand(_ => BrowseOutput(), _ => IsEditingEnabled);
         OpenOutputCommand = new RelayCommand(_ => _dialogs.OpenFolder(OutputDirectory));
@@ -85,6 +90,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public AsyncRelayCommand PrimaryCommand { get; }
     public AsyncRelayCommand PauseResumeCommand { get; }
+    public AsyncRelayCommand MicToggleCommand { get; }
     public AsyncRelayCommand RefreshDevicesCommand { get; }
     public RelayCommand BrowseOutputCommand { get; }
     public RelayCommand OpenOutputCommand { get; }
@@ -232,6 +238,23 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public string MicToggleHotKey
+    {
+        get => _micToggleHotKey;
+        set
+        {
+            if (!SetProperty(ref _micToggleHotKey, value)) return;
+            ScheduleSettingsSave();
+            HotKeysChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public bool StartMicrophoneMuted
+    {
+        get => _startMicrophoneMuted;
+        set { if (SetProperty(ref _startMicrophoneMuted, value)) ScheduleSettingsSave(); }
+    }
+
     public bool PreviewEnabled
     {
         get => _previewEnabled;
@@ -290,6 +313,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsEditingEnabled => State is RecordingState.Idle or RecordingState.Failed;
     public bool IsActivelyRecording => State is RecordingState.Recording or RecordingState.Paused or RecordingState.Finalizing;
+    public bool MicrophoneToggleEnabled => State is RecordingState.Recording or RecordingState.Paused && _microphoneToggleAvailable;
+
+    public bool IsMicrophoneLive
+    {
+        get => _microphoneLive;
+        private set
+        {
+            if (!SetProperty(ref _microphoneLive, value)) return;
+            OnPropertyChanged(nameof(MicToggleButtonText));
+        }
+    }
+
+    public string MicToggleButtonText => IsMicrophoneLive ? "🎤  麦克风：开" : "🎤  麦克风：关";
+
     public string PrimaryButtonText => State switch
     {
         RecordingState.Idle or RecordingState.Failed => "●  开始录制",
@@ -387,6 +424,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture,
                 PreviewEnabled = PreviewEnabled
             };
+            request = request with
+            {
+                StartMicrophoneMuted = CaptureMicrophone && StartMicrophoneMuted
+            };
+            _microphoneToggleAvailable = CaptureMicrophone;
+            IsMicrophoneLive = !request.StartMicrophoneMuted;
+            RefreshCommandStates();
             await _recordingService.StartAsync(request);
         }
         catch (Exception error)
@@ -407,6 +451,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             WarningText = error.Message;
             _dialogs.ShowError("操作失败", error.Message);
+        }
+    }
+
+    public async Task ToggleMicrophoneAsync()
+    {
+        if (!MicrophoneToggleEnabled) return;
+        try
+        {
+            await _recordingService.SetMicrophoneEnabledAsync(!IsMicrophoneLive);
+            IsMicrophoneLive = !IsMicrophoneLive;
+        }
+        catch (Exception error)
+        {
+            WarningText = error.Message;
+            _dialogs.ShowError("麦克风切换失败", error.Message);
         }
     }
 
@@ -579,6 +638,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             PreviewImage = null;
             OnPropertyChanged(nameof(PreviewPlaceholderText));
+            _microphoneToggleAvailable = false;
+            IsMicrophoneLive = true;
         }
         if (eventArgs.Current == RecordingState.Failed) _ = RefreshRecoveryAsync();
         RecordingActivityChanged?.Invoke(this, eventArgs.Current);
@@ -641,6 +702,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _countdownSeconds = settings.CountdownSeconds;
         _startStopHotKey = settings.StartStopHotKey;
         _pauseResumeHotKey = settings.PauseResumeHotKey;
+        _micToggleHotKey = settings.MicToggleHotKey;
+        _startMicrophoneMuted = settings.StartMicrophoneMuted;
         _previewEnabled = settings.PreviewEnabled;
         _rememberHistoryDeleteChoice = settings.RememberHistoryDeleteChoice;
         _deleteLocalFileWhenDeletingHistory = settings.DeleteLocalFileWhenDeletingHistory;
@@ -659,6 +722,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CountdownSeconds = CountdownSeconds,
         StartStopHotKey = StartStopHotKey,
         PauseResumeHotKey = PauseResumeHotKey,
+        MicToggleHotKey = MicToggleHotKey,
+        StartMicrophoneMuted = StartMicrophoneMuted,
         ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture,
         HasAcceptedCaptureProtectionWarning = _hasAcceptedCaptureProtectionWarning,
         PreviewEnabled = PreviewEnabled,
@@ -695,6 +760,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         PrimaryCommand.RaiseCanExecuteChanged();
         PauseResumeCommand.RaiseCanExecuteChanged();
+        MicToggleCommand.RaiseCanExecuteChanged();
         RefreshDevicesCommand.RaiseCanExecuteChanged();
         BrowseOutputCommand.RaiseCanExecuteChanged();
         RecoverCommand.RaiseCanExecuteChanged();

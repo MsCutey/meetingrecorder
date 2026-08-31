@@ -64,6 +64,8 @@ public sealed class ResilientAudioOnlyRecordingEngine : IRecordingEngine
 
     public Task PauseAsync(CancellationToken cancellationToken = default) => _active.PauseAsync(cancellationToken);
     public Task ResumeAsync(CancellationToken cancellationToken = default) => _active.ResumeAsync(cancellationToken);
+    public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        _active.SetMicrophoneEnabledAsync(enabled, cancellationToken);
     public Task<TimeSpan> StopAsync(CancellationToken cancellationToken = default) => _active.StopAsync(cancellationToken);
 
     private void Attach(IRecordingEngine engine)

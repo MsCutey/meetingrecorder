@@ -16,6 +16,15 @@
     </Border>
     <Border Background="White" BorderBrush="#E7EAF0" BorderThickness="1" CornerRadius="12" Padding="20" Margin="0,14,0,0">
       <StackPanel>
+        <TextBlock Text="麦克风" FontSize="15" FontWeight="SemiBold" Foreground="#172033" Margin="0,0,0,14" />
+        <CheckBox Content="录制开始后默认静音麦克风（可随时开启）" FontWeight="SemiBold"
+                  IsChecked="{Binding StartMicrophoneMuted}" />
+        <TextBlock Text="适合会议场景：默认只收录系统声音，轮到你讲话时再用麦克风按钮或热键开启。录制进行中也可随时在主界面、托盘或热键里开关麦克风。"
+                   TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="24,6,0,0" />
+      </StackPanel>
+    </Border>
+    <Border Background="White" BorderBrush="#E7EAF0" BorderThickness="1" CornerRadius="12" Padding="20" Margin="0,14,0,0">
+      <StackPanel>
         <TextBlock Text="录制历史" FontSize="15" FontWeight="SemiBold" Foreground="#172033" Margin="0,0,0,14" />
         <CheckBox Content="记住我的删除选择" FontWeight="SemiBold"
                   IsChecked="{Binding RememberHistoryDeleteChoice}" />

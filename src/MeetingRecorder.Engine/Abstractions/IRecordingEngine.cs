@@ -15,6 +15,7 @@ public interface IRecordingEngine : IAsyncDisposable
     Task StartAsync(CancellationToken cancellationToken = default);
     Task PauseAsync(CancellationToken cancellationToken = default);
     Task ResumeAsync(CancellationToken cancellationToken = default);
+    Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task<TimeSpan> StopAsync(CancellationToken cancellationToken = default);
 }
 
@@ -24,6 +25,9 @@ public sealed class EngineFaultEventArgs(Exception error) : EventArgs
 }
 
 public sealed class HardwareEncoderUnavailableException(string message, Exception? innerException = null)
+    : InvalidOperationException(message, innerException);
+
+public sealed class WindowCaptureUnavailableException(string message, Exception? innerException = null)
     : InvalidOperationException(message, innerException);
 
 public sealed class AudioBufferOverflowException(string message) : IOException(message);

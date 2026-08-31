@@ -9,7 +9,7 @@ public sealed class AppSettingsMigrationTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "MeetingRecorderSettingsMigration", Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task V1RandomAudioIds_AreClearedAndSchemaUpgradesToThree()
+    public async Task V1RandomAudioIds_AreClearedAndSchemaUpgradesToCurrent()
     {
         Directory.CreateDirectory(_root);
         var paths = CreatePaths();
@@ -27,7 +27,7 @@ public sealed class AppSettingsMigrationTests : IDisposable
 
         var loaded = await new AppRepository(paths).LoadSettingsAsync();
 
-        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(AppSettings.CurrentSchemaVersion, loaded.SchemaVersion);
         Assert.Null(loaded.SystemAudioDeviceId);
         Assert.Null(loaded.MicrophoneDeviceId);
         Assert.False(loaded.ExcludeMainWindowFromDisplayCapture);
@@ -78,7 +78,7 @@ public sealed class AppSettingsMigrationTests : IDisposable
 
         var loaded = await new AppRepository(paths).LoadSettingsAsync();
 
-        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(AppSettings.CurrentSchemaVersion, loaded.SchemaVersion);
         Assert.Equal(5, loaded.CountdownSeconds);
         Assert.True(loaded.HasAcceptedRecordingNotice);
         Assert.True(loaded.ExcludeMainWindowFromDisplayCapture);
@@ -86,6 +86,52 @@ public sealed class AppSettingsMigrationTests : IDisposable
         Assert.True(loaded.PreviewEnabled);
         Assert.False(loaded.RememberHistoryDeleteChoice);
         Assert.False(loaded.DeleteLocalFileWhenDeletingHistory);
+    }
+
+    [Fact]
+    public async Task V3Settings_UpgradeToSchemaFourWithMicrophoneDefaults()
+    {
+        Directory.CreateDirectory(_root);
+        var paths = CreatePaths();
+        await File.WriteAllTextAsync(paths.SettingsPath, """
+            {
+              "schemaVersion": 3,
+              "outputDirectory": "C:\\Recordings",
+              "countdownSeconds": 3,
+              "startStopHotKey": "Ctrl+Shift+F9",
+              "pauseResumeHotKey": "Ctrl+Shift+F10"
+            }
+            """);
+
+        var loaded = await new AppRepository(paths).LoadSettingsAsync();
+
+        Assert.Equal(4, loaded.SchemaVersion);
+        Assert.Equal("Ctrl+Shift+F11", loaded.MicToggleHotKey);
+        Assert.False(loaded.StartMicrophoneMuted);
+    }
+
+    [Fact]
+    public async Task V3Settings_WithMicrophonePreferences_ArePreserved()
+    {
+        Directory.CreateDirectory(_root);
+        var paths = CreatePaths();
+        await File.WriteAllTextAsync(paths.SettingsPath, """
+            {
+              "schemaVersion": 3,
+              "outputDirectory": "C:\\Recordings",
+              "countdownSeconds": 3,
+              "startStopHotKey": "Ctrl+Shift+F9",
+              "pauseResumeHotKey": "Ctrl+Shift+F10",
+              "micToggleHotKey": "Ctrl+Alt+F11",
+              "startMicrophoneMuted": true
+            }
+            """);
+
+        var loaded = await new AppRepository(paths).LoadSettingsAsync();
+
+        Assert.Equal(4, loaded.SchemaVersion);
+        Assert.Equal("Ctrl+Alt+F11", loaded.MicToggleHotKey);
+        Assert.True(loaded.StartMicrophoneMuted);
     }
 
     private AppDataPaths CreatePaths() => new(

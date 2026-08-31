@@ -46,6 +46,29 @@ public sealed class VideoRecordingOptionsTests
         Assert.Equal(enabled, output.IsVideoFramePreviewEnabled);
     }
 
+    [Fact]
+    public void WindowFallbackCrop_IsForwardedToOutputSourceRect()
+    {
+        var request = Request(captureSystemAudio: true, captureMicrophone: false);
+        var crop = new ScreenRecorderLib.ScreenRect(10, 20, 640, 480);
+
+        var output = VideoRecordingEngine.CreateOutputOptions(request, crop);
+
+        Assert.NotNull(output.SourceRect);
+        Assert.Equal(10, output.SourceRect!.Left);
+        Assert.Equal(20, output.SourceRect.Top);
+        Assert.Equal(640, output.SourceRect.Width);
+        Assert.Equal(480, output.SourceRect.Height);
+    }
+
+    [Fact]
+    public void WithoutCrop_SourceRectRemainsNull()
+    {
+        var output = VideoRecordingEngine.CreateOutputOptions(Request(captureSystemAudio: false, captureMicrophone: true));
+
+        Assert.Null(output.SourceRect);
+    }
+
     private static WorkerRecordingRequest Request(bool captureSystemAudio, bool captureMicrophone) => new()
     {
         SessionId = "test",
