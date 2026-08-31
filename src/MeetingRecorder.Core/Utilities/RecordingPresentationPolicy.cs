@@ -15,12 +15,9 @@ public static class RecordingPresentationPolicy
     public static bool ShouldEnablePreview(RecordingRequest request, bool captureProtectionApplied)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Mode != RecordingMode.VideoAndAudio) return false;
-        return request.CaptureTarget?.Kind switch
-        {
-            CaptureTargetKind.Window => true,
-            CaptureTargetKind.Display => captureProtectionApplied,
-            _ => false
-        };
+        _ = captureProtectionApplied;
+        return request.PreviewEnabled &&
+               request.Mode == RecordingMode.VideoAndAudio &&
+               request.CaptureTarget is not null;
     }
 }

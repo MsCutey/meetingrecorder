@@ -1,0 +1,28 @@
+<Window x:Class="MeetingRecorder.App.DeleteRecordingDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="删除录制记录" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        Icon="Assets/MeetingRecorder.ico"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Background="#F8FAFC">
+  <Grid Margin="30">
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <StackPanel>
+      <Border Width="52" Height="52" CornerRadius="26" Background="#FEF3F2" HorizontalAlignment="Left">
+        <TextBlock Text="✕" Foreground="#B42318" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+      <TextBlock Text="删除这条录制记录？" FontSize="20" FontWeight="SemiBold" Foreground="#101828" Margin="0,18,0,8" />
+      <TextBlock x:Name="FileNameText" Foreground="#475467" TextWrapping="Wrap" FontWeight="SemiBold" />
+      <TextBlock Text="删除记录后可选择同时删除本地文件，本地文件删除后无法找回。" Foreground="#475467" TextWrapping="Wrap" Margin="0,6,0,0" />
+    </StackPanel>
+    <StackPanel Grid.Row="1" Margin="0,20,0,0">
+      <CheckBox x:Name="DeleteLocalFileCheckBox" FontWeight="SemiBold"
+                Content="同时删除本地文件" />
+      <CheckBox x:Name="RememberChoiceCheckBox" Margin="0,12,0,0"
+                Content="记住我的选择，下次不再询问" />
+    </StackPanel>
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+      <Button Content="取消" Width="112" Margin="0,0,10,0" Style="{StaticResource SoftButtonStyle}" Click="CancelClick" />
+      <Button Content="删除" Width="112" Style="{StaticResource PrimaryButtonStyle}" Padding="14,10" Click="DeleteClick" />
+    </StackPanel>
+  </Grid>
+</Window>

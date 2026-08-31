@@ -41,6 +41,7 @@
             </Ellipse.Style>
           </Ellipse>
           <TextBlock Text="{Binding StatusText}" Foreground="#EAECF0" FontSize="13" VerticalAlignment="Center" />
+          <Button Content="⚙ 设置" Margin="16,0,0,0" VerticalAlignment="Center" Style="{StaticResource SoftButtonStyle}" Padding="12,6" Click="OpenSettingsClick" />
         </StackPanel>
       </Grid>
     </Border>
@@ -48,7 +49,7 @@
     <Border Grid.Row="1" Background="#FFF4E5" BorderBrush="#FEC84B" BorderThickness="0,0,0,1"
             Visibility="{Binding HasRecoveries, Converter={StaticResource BooleanToVisibilityConverter}}">
       <Grid Margin="28,10">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
         <TextBlock Text="{Binding RecoveryBannerText}" Foreground="#7A2E0E" FontWeight="SemiBold" VerticalAlignment="Center" />
         <ItemsControl Grid.Column="1" ItemsSource="{Binding RecoveryCandidates}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -60,6 +61,8 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
+        <Button Grid.Column="2" Content="✕" Margin="8,0,0,0" VerticalAlignment="Center" Style="{StaticResource SoftButtonStyle}" Padding="10,5"
+                ToolTip="本次会话内不再提醒" Command="{Binding DismissRecoveryCommand}" />
       </Grid>
     </Border>
 
@@ -227,8 +230,12 @@
                         <TextBlock Text="{Binding SizeText}" Foreground="#667085" FontSize="11" />
                       </StackPanel>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="查看" Margin="10,0,0,0" VerticalAlignment="Center" Style="{StaticResource SoftButtonStyle}" Padding="9,5"
-                            Command="{Binding DataContext.OpenHistoryItemCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
+                      <Button Content="查看" VerticalAlignment="Center" Style="{StaticResource SoftButtonStyle}" Padding="9,5"
+                              Command="{Binding DataContext.OpenHistoryItemCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                      <Button Content="删除" Margin="8,0,0,0" VerticalAlignment="Center" Style="{StaticResource SoftButtonStyle}" Padding="9,5"
+                              Command="{Binding DataContext.DeleteHistoryItemCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                    </StackPanel>
                   </Grid>
                 </DataTemplate>
               </ListView.ItemTemplate>

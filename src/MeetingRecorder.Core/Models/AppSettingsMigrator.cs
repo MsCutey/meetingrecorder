@@ -8,6 +8,7 @@ public static class AppSettingsMigrator
         return settings.SchemaVersion switch
         {
             AppSettings.CurrentSchemaVersion => NormalizeCaptureProtection(settings),
+            2 => NormalizeCaptureProtection(settings with { SchemaVersion = AppSettings.CurrentSchemaVersion }),
             <= 1 => NormalizeCaptureProtection(
                 settings with
                 {

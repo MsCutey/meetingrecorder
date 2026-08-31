@@ -6,7 +6,7 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.1.1"
+!define VERSION "1.1.2"
 !endif
 !ifndef APP_FILES
   !error "APP_FILES 未定义"

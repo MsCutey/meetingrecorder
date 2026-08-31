@@ -71,6 +71,7 @@ public sealed record RecordingRequest
     public int CountdownSeconds { get; init; } = 3;
     public bool PreferHardwareEncoding { get; init; } = true;
     public bool ExcludeMainWindowFromDisplayCapture { get; init; }
+    public bool PreviewEnabled { get; init; } = true;
 }
 
 public sealed record RecordingProgress(

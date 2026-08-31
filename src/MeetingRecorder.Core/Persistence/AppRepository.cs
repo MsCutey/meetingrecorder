@@ -94,6 +94,34 @@ public sealed class AppRepository : IAppRepository
         }
     }
 
+    public async Task RemoveHistoryAsync(string historyId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(historyId);
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            List<RecordingHistoryItem> history;
+            try
+            {
+                history = await _json.ReadAsync<List<RecordingHistoryItem>>(Paths.HistoryPath, cancellationToken).ConfigureAwait(false) ?? [];
+            }
+            catch (JsonException)
+            {
+                PreserveCorruptFile(Paths.HistoryPath);
+                history = [];
+            }
+
+            if (history.RemoveAll(item => item.Id == historyId) > 0)
+            {
+                await _json.WriteAsync(Paths.HistoryPath, history, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
     public async Task SaveActiveSessionAsync(ActiveSession session, CancellationToken cancellationToken = default)
     {
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);

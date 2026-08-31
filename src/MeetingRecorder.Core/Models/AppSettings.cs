@@ -4,7 +4,7 @@ namespace MeetingRecorder.Core.Models;
 
 public sealed record AppSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public string OutputDirectory { get; init; } = DefaultOutputDirectory();
@@ -21,6 +21,9 @@ public sealed record AppSettings
     public bool HasAcceptedRecordingNotice { get; init; }
     public bool ExcludeMainWindowFromDisplayCapture { get; init; }
     public bool HasAcceptedCaptureProtectionWarning { get; init; }
+    public bool PreviewEnabled { get; init; } = true;
+    public bool RememberHistoryDeleteChoice { get; init; }
+    public bool DeleteLocalFileWhenDeletingHistory { get; init; }
 
     public static string DefaultOutputDirectory()
     {

@@ -38,9 +38,9 @@ public sealed class WindowCapturePresentationCoordinator(
             var handle = Interlocked.CompareExchange(ref _windowHandle, nint.Zero, nint.Zero);
             if (handle == nint.Zero)
             {
-                const string warning = "主窗口尚未完成初始化，无法启用界面防捕获；已关闭整屏实时预览。";
+                const string warning = "主窗口尚未完成初始化，无法启用界面防捕获。";
                 logger.Warning("capture-protection", warning);
-                return new RecordingPresentationDecision(false, false, warning);
+                return new RecordingPresentationDecision(false, RecordingPresentationPolicy.ShouldEnablePreview(request, captureProtectionApplied: false), warning);
             }
 
             var operation = dispatcher.InvokeAsync(
@@ -50,9 +50,9 @@ public sealed class WindowCapturePresentationCoordinator(
             var result = await operation.Task.ConfigureAwait(false);
             if (!result.IsSuccess)
             {
-                var warning = $"无法启用界面防捕获；已关闭整屏实时预览并继续录制：{result.Warning}";
+                var warning = $"无法启用界面防捕获并继续录制：{result.Warning}";
                 logger.Warning("capture-protection", warning);
-                return new RecordingPresentationDecision(false, false, warning);
+                return new RecordingPresentationDecision(false, RecordingPresentationPolicy.ShouldEnablePreview(request, captureProtectionApplied: false), warning);
             }
 
             _isApplied = true;

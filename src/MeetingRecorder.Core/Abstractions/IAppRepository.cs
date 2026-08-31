@@ -9,6 +9,7 @@ public interface IAppRepository
     Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RecordingHistoryItem>> LoadHistoryAsync(CancellationToken cancellationToken = default);
     Task AddHistoryAsync(RecordingHistoryItem item, CancellationToken cancellationToken = default);
+    Task RemoveHistoryAsync(string historyId, CancellationToken cancellationToken = default);
     Task SaveActiveSessionAsync(ActiveSession session, CancellationToken cancellationToken = default);
     Task ClearActiveSessionAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RecoveryCandidate>> ScanRecoveryAsync(CancellationToken cancellationToken = default);

@@ -20,6 +20,13 @@ public sealed class DesktopDialogService : IDesktopDialogService
         return dialog.ShowDialog() == true;
     }
 
+    public HistoryDeleteChoice AskDeleteHistoryItem(string fileName)
+    {
+        var dialog = new DeleteRecordingDialog(fileName) { Owner = _owner() };
+        var confirmed = dialog.ShowDialog() == true;
+        return new HistoryDeleteChoice(confirmed, confirmed && dialog.DeleteLocalFile, confirmed && dialog.RememberChoice);
+    }
+
     public bool Confirm(string title, string message) =>
         System.Windows.MessageBox.Show(_owner(), message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 

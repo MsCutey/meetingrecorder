@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using MeetingRecorder.App.Services;
@@ -40,8 +41,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _isInitialized;
     private bool _isSaving;
     private bool _disposed;
-    private bool _displayPreviewSuppressedForCurrentSession;
+    private bool _previewEnabled = true;
+    private bool _rememberHistoryDeleteChoice;
+    private bool _deleteLocalFileWhenDeletingHistory;
     private int _previewUpdatePending;
+    private readonly HashSet<string> _dismissedRecoveryIds = new(StringComparer.Ordinal);
 
     public MainViewModel(IRecordingService recordingService, IAppRepository repository, IDesktopDialogService dialogs)
     {
@@ -62,6 +66,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OpenOutputCommand = new RelayCommand(_ => _dialogs.OpenFolder(OutputDirectory));
         OpenHistoryItemCommand = new RelayCommand(OpenHistoryItem);
         RecoverCommand = new AsyncRelayCommand(RecoverAsync, _ => IsEditingEnabled);
+        DeleteHistoryItemCommand = new AsyncRelayCommand(DeleteHistoryItemAsync);
+        DismissRecoveryCommand = new RelayCommand(_ => DismissRecovery(), _ => RecoveryCandidates.Count > 0);
     }
 
     public ObservableCollection<CaptureTargetInfo> CaptureTargets { get; } = [];
@@ -84,6 +90,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand OpenOutputCommand { get; }
     public RelayCommand OpenHistoryItemCommand { get; }
     public AsyncRelayCommand RecoverCommand { get; }
+    public AsyncRelayCommand DeleteHistoryItemCommand { get; }
+    public RelayCommand DismissRecoveryCommand { get; }
 
     public RecordingMode SelectedMode
     {
@@ -224,6 +232,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    public bool PreviewEnabled
+    {
+        get => _previewEnabled;
+        set
+        {
+            if (!SetProperty(ref _previewEnabled, value)) return;
+            if (!value) PreviewImage = null;
+            OnPropertyChanged(nameof(PreviewPlaceholderText));
+            ScheduleSettingsSave();
+        }
+    }
+
+    public bool RememberHistoryDeleteChoice
+    {
+        get => _rememberHistoryDeleteChoice;
+        set
+        {
+            if (!SetProperty(ref _rememberHistoryDeleteChoice, value)) return;
+            if (!value) _deleteLocalFileWhenDeletingHistory = false;
+            OnPropertyChanged(nameof(RememberedDeleteChoiceText));
+            ScheduleSettingsSave();
+        }
+    }
+
+    public bool DeleteLocalFileWhenDeletingHistory
+    {
+        get => _deleteLocalFileWhenDeletingHistory;
+        set
+        {
+            if (!SetProperty(ref _deleteLocalFileWhenDeletingHistory, value)) return;
+            OnPropertyChanged(nameof(RememberedDeleteChoiceText));
+            ScheduleSettingsSave();
+        }
+    }
+
+    public string RememberedDeleteChoiceText => RememberHistoryDeleteChoice
+        ? DeleteLocalFileWhenDeletingHistory
+            ? "已记住：删除记录时同时删除本地文件"
+            : "已记住：仅移除记录，保留本地文件"
+        : "未记住：每次删除前都会弹窗确认";
+
     public RecordingState State
     {
         get => _state;
@@ -262,9 +311,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ImageSource? PreviewImage { get => _previewImage; private set { if (SetProperty(ref _previewImage, value)) OnPropertyChanged(nameof(HasPreview)); } }
     public bool HasPreview => PreviewImage is not null;
     public string PreviewPlaceholderText =>
-        _displayPreviewSuppressedForCurrentSession && State is not (RecordingState.Idle or RecordingState.Failed)
-            ? "为避免递归画面，整屏实时预览已关闭"
-            : "录制开始后显示低分辨率预览";
+        _previewEnabled ? "录制开始后显示低分辨率预览" : "实时预览已关闭 · 可在设置中开启";
     public bool IsLoading { get => _isLoading; private set { if (SetProperty(ref _isLoading, value)) RefreshCommandStates(); } }
     public bool HasRecoveries => RecoveryCandidates.Count > 0;
     public string RecoveryBannerText => $"发现 {RecoveryCandidates.Count} 个异常中断的录制，可尝试恢复。";
@@ -325,11 +372,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (!await EnsureRecordingNoticeAsync()) return;
 
             WarningText = null;
-            _displayPreviewSuppressedForCurrentSession =
-                SelectedMode == RecordingMode.VideoAndAudio &&
-                SelectedTarget?.Kind == CaptureTargetKind.Display &&
-                !ExcludeMainWindowFromDisplayCapture;
-            OnPropertyChanged(nameof(PreviewPlaceholderText));
             var request = new RecordingRequest
             {
                 Mode = SelectedMode,
@@ -342,7 +384,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 OutputDirectory = OutputDirectory,
                 CountdownSeconds = CountdownSeconds,
                 PreferHardwareEncoding = true,
-                ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture
+                ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture,
+                PreviewEnabled = PreviewEnabled
             };
             await _recordingService.StartAsync(request);
         }
@@ -441,7 +484,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         var items = await _repository.ScanRecoveryAsync();
         RecoveryCandidates.Clear();
-        foreach (var item in items) RecoveryCandidates.Add(item);
+        foreach (var item in items)
+        {
+            if (_dismissedRecoveryIds.Contains(item.Id)) continue;
+            RecoveryCandidates.Add(item);
+        }
         OnPropertyChanged(nameof(HasRecoveries));
         OnPropertyChanged(nameof(RecoveryBannerText));
     }
@@ -460,6 +507,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         catch (Exception error)
         {
             _dialogs.ShowError("恢复失败", error.Message);
+        }
+    }
+
+    private void DismissRecovery()
+    {
+        foreach (var candidate in RecoveryCandidates) _dismissedRecoveryIds.Add(candidate.Id);
+        RecoveryCandidates.Clear();
+        OnPropertyChanged(nameof(HasRecoveries));
+        OnPropertyChanged(nameof(RecoveryBannerText));
+        DismissRecoveryCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task DeleteHistoryItemAsync(object? parameter)
+    {
+        if (parameter is not RecordingHistoryRow row) return;
+        var deleteLocalFile = DeleteLocalFileWhenDeletingHistory;
+        if (!RememberHistoryDeleteChoice)
+        {
+            var choice = _dialogs.AskDeleteHistoryItem(row.FileName);
+            if (!choice.Confirmed) return;
+            deleteLocalFile = choice.DeleteLocalFile;
+            if (choice.RememberChoice)
+            {
+                RememberHistoryDeleteChoice = true;
+                DeleteLocalFileWhenDeletingHistory = deleteLocalFile;
+            }
+        }
+
+        try
+        {
+            await _repository.RemoveHistoryAsync(row.Item.Id);
+            History.Remove(row);
+            if (deleteLocalFile && File.Exists(row.Item.FilePath))
+            {
+                try { File.Delete(row.Item.FilePath); }
+                catch (Exception error) { _dialogs.ShowError("删除本地文件失败", $"记录已移除，但文件仍在：\n{row.Item.FilePath}\n\n{error.Message}"); }
+            }
+        }
+        catch (Exception error)
+        {
+            _dialogs.ShowError("删除记录失败", error.Message);
         }
     }
 
@@ -490,7 +578,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         if (eventArgs.Current is RecordingState.Idle or RecordingState.Failed)
         {
             PreviewImage = null;
-            _displayPreviewSuppressedForCurrentSession = false;
             OnPropertyChanged(nameof(PreviewPlaceholderText));
         }
         if (eventArgs.Current == RecordingState.Failed) _ = RefreshRecoveryAsync();
@@ -514,7 +601,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnPreviewFrameAvailable(object? sender, PreviewFrameEventArgs eventArgs)
     {
-        if (_displayPreviewSuppressedForCurrentSession) return;
+        if (!_previewEnabled) return;
         if (Interlocked.Exchange(ref _previewUpdatePending, 1) != 0) return;
         RunOnUi(() =>
         {
@@ -554,6 +641,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _countdownSeconds = settings.CountdownSeconds;
         _startStopHotKey = settings.StartStopHotKey;
         _pauseResumeHotKey = settings.PauseResumeHotKey;
+        _previewEnabled = settings.PreviewEnabled;
+        _rememberHistoryDeleteChoice = settings.RememberHistoryDeleteChoice;
+        _deleteLocalFileWhenDeletingHistory = settings.DeleteLocalFileWhenDeletingHistory;
         OnPropertyChanged(string.Empty);
     }
 
@@ -570,7 +660,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StartStopHotKey = StartStopHotKey,
         PauseResumeHotKey = PauseResumeHotKey,
         ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture,
-        HasAcceptedCaptureProtectionWarning = _hasAcceptedCaptureProtectionWarning
+        HasAcceptedCaptureProtectionWarning = _hasAcceptedCaptureProtectionWarning,
+        PreviewEnabled = PreviewEnabled,
+        RememberHistoryDeleteChoice = RememberHistoryDeleteChoice,
+        DeleteLocalFileWhenDeletingHistory = DeleteLocalFileWhenDeletingHistory
     };
 
     private void ScheduleSettingsSave()
@@ -605,6 +698,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshDevicesCommand.RaiseCanExecuteChanged();
         BrowseOutputCommand.RaiseCanExecuteChanged();
         RecoverCommand.RaiseCanExecuteChanged();
+        DismissRecoveryCommand.RaiseCanExecuteChanged();
     }
 
     private void RunOnUi(Action action)

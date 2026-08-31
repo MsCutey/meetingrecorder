@@ -71,6 +71,9 @@ public partial class MainWindow : Window
 
     private void OnHotKeysChanged(object? sender, EventArgs eventArgs) => TryRegisterHotKeys(showError: true);
 
+    private void OpenSettingsClick(object sender, RoutedEventArgs eventArgs) =>
+        new SettingsWindow(_viewModel) { Owner = this }.ShowDialog();
+
     private void TryRegisterHotKeys(bool showError)
     {
         if (_hotKeys is null) return;

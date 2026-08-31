@@ -78,6 +78,51 @@ public sealed class AppRepositoryTests : IDisposable
         Assert.EndsWith(".mp4", recovered, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RemoveHistory_DeletesMatchingIdAndKeepsOthers()
+    {
+        var repository = CreateRepository();
+        var output = Path.Combine(_root, "Output");
+        Directory.CreateDirectory(output);
+        await repository.SaveSettingsAsync(new AppSettings { OutputDirectory = output });
+        var keep = HistoryItem("keep", Path.Combine(output, "keep.mp4"));
+        var remove = HistoryItem("remove", Path.Combine(output, "remove.mp4"));
+        await repository.AddHistoryAsync(keep);
+        await repository.AddHistoryAsync(remove);
+
+        await repository.RemoveHistoryAsync("remove");
+
+        var remaining = await repository.LoadHistoryAsync();
+        var single = Assert.Single(remaining);
+        Assert.Equal("keep", single.Id);
+        Assert.False(File.Exists(repository.Paths.HistoryPath + ".tmp"));
+    }
+
+    [Fact]
+    public async Task RemoveHistory_UnknownId_IsNoOp()
+    {
+        var repository = CreateRepository();
+        var output = Path.Combine(_root, "Output");
+        Directory.CreateDirectory(output);
+        await repository.SaveSettingsAsync(new AppSettings { OutputDirectory = output });
+        await repository.AddHistoryAsync(HistoryItem("only", Path.Combine(output, "only.mp4")));
+
+        await repository.RemoveHistoryAsync("does-not-exist");
+
+        var remaining = await repository.LoadHistoryAsync();
+        Assert.Single(remaining);
+    }
+
+    private static RecordingHistoryItem HistoryItem(string id, string filePath) => new()
+    {
+        Id = id,
+        FilePath = filePath,
+        Mode = RecordingMode.VideoAndAudio,
+        StartedAt = DateTimeOffset.Now,
+        FinishedAt = DateTimeOffset.Now.AddMinutes(1),
+        Duration = TimeSpan.FromMinutes(1),
+        FileSizeBytes = 1024
+    };
     private AppRepository CreateRepository()
     {
         Directory.CreateDirectory(_root);
