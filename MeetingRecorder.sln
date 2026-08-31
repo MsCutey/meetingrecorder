@@ -8,6 +8,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeetingRecorder.App", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeetingRecorder.Tests", "tests\MeetingRecorder.Tests\MeetingRecorder.Tests.csproj", "{51473714-BC3D-4465-92A1-5859459319C7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeetingRecorder.Engine", "src\MeetingRecorder.Engine\MeetingRecorder.Engine.csproj", "{7A8F99F3-31BE-4CE7-B282-92E02430CB61}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MeetingRecorder.Worker", "src\MeetingRecorder.Worker\MeetingRecorder.Worker.csproj", "{C143D55D-8A4D-49CB-9C09-5609901918B2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -26,6 +30,14 @@ Global
 		{51473714-BC3D-4465-92A1-5859459319C7}.Debug|x64.Build.0 = Debug|x64
 		{51473714-BC3D-4465-92A1-5859459319C7}.Release|x64.ActiveCfg = Release|x64
 		{51473714-BC3D-4465-92A1-5859459319C7}.Release|x64.Build.0 = Release|x64
+		{7A8F99F3-31BE-4CE7-B282-92E02430CB61}.Debug|x64.ActiveCfg = Debug|x64
+		{7A8F99F3-31BE-4CE7-B282-92E02430CB61}.Debug|x64.Build.0 = Debug|x64
+		{7A8F99F3-31BE-4CE7-B282-92E02430CB61}.Release|x64.ActiveCfg = Release|x64
+		{7A8F99F3-31BE-4CE7-B282-92E02430CB61}.Release|x64.Build.0 = Release|x64
+		{C143D55D-8A4D-49CB-9C09-5609901918B2}.Debug|x64.ActiveCfg = Debug|x64
+		{C143D55D-8A4D-49CB-9C09-5609901918B2}.Debug|x64.Build.0 = Debug|x64
+		{C143D55D-8A4D-49CB-9C09-5609901918B2}.Release|x64.ActiveCfg = Release|x64
+		{C143D55D-8A4D-49CB-9C09-5609901918B2}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,12 +1,12 @@
 MeetingRecorder third-party notices
 ===================================
 
-ScreenRecorderLib 7.0.0
+ScreenRecorderLib 6.6.0
 Project: https://github.com/sskodje/ScreenRecorderLib
 Copyright (c) 2017 Sverre Skodje
 License: MIT
 
-NAudio.Core / NAudio.Wasapi 3.0.1
+NAudio.Core / NAudio.Wasapi 2.2.1
 Project: https://github.com/naudio/NAudio
 Copyright (c) Mark Heath and contributors
 License: MIT

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MeetingRecorder.Engine</AssemblyName>
+    <RootNamespace>MeetingRecorder.Engine</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>MeetingRecorder 的进程隔离原生录制引擎。</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MeetingRecorder.Core\MeetingRecorder.Core.csproj" />
+    <PackageReference Include="ScreenRecorderLib" />
+    <PackageReference Include="NAudio.Wasapi" />
+  </ItemGroup>
+</Project>

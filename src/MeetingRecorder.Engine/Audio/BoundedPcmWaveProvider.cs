@@ -1,12 +1,12 @@
 using NAudio.Wave;
 
-namespace MeetingRecorder.Core.Audio;
+namespace MeetingRecorder.Engine.Audio;
 
 public sealed class BoundedPcmWaveProvider : IWaveProvider, IDisposable
 {
     private readonly object _gate = new();
     private readonly Queue<byte[]> _queue = new();
-    private readonly int _maxBufferedBytes;
+    private readonly int _maximumBufferedBytes;
     private byte[]? _current;
     private int _currentOffset;
     private int _bufferedBytes;
@@ -17,11 +17,11 @@ public sealed class BoundedPcmWaveProvider : IWaveProvider, IDisposable
     {
         WaveFormat = new WaveFormat(sampleRate, bitsPerSample, channels);
         var duration = capacity ?? TimeSpan.FromSeconds(10);
-        _maxBufferedBytes = checked((int)Math.Ceiling(WaveFormat.AverageBytesPerSecond * duration.TotalSeconds));
+        _maximumBufferedBytes = checked((int)Math.Ceiling(WaveFormat.AverageBytesPerSecond * duration.TotalSeconds));
     }
 
     public WaveFormat WaveFormat { get; }
-    public int MaxBufferedBytes => _maxBufferedBytes;
+    public int MaximumBufferedBytes => _maximumBufferedBytes;
     public int BufferedBytes { get { lock (_gate) return _bufferedBytes; } }
 
     public bool TryWrite(ReadOnlySpan<byte> data)
@@ -30,8 +30,7 @@ public sealed class BoundedPcmWaveProvider : IWaveProvider, IDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_completed) return false;
-            if (data.Length > _maxBufferedBytes - _bufferedBytes) return false;
+            if (_completed || data.Length > _maximumBufferedBytes - _bufferedBytes) return false;
             _queue.Enqueue(data.ToArray());
             _bufferedBytes += data.Length;
             Monitor.PulseAll(_gate);
@@ -39,30 +38,27 @@ public sealed class BoundedPcmWaveProvider : IWaveProvider, IDisposable
         }
     }
 
-    public int Read(Span<byte> buffer)
+    public int Read(byte[] buffer, int offset, int count)
     {
+        ArgumentNullException.ThrowIfNull(buffer);
+        if (offset < 0 || count < 0 || offset > buffer.Length - count) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (_gate)
         {
-            while (!_disposed && !_completed && _current is null && _queue.Count == 0)
-            {
-                Monitor.Wait(_gate);
-            }
-
+            while (!_disposed && !_completed && _current is null && _queue.Count == 0) Monitor.Wait(_gate);
             if (_disposed) return 0;
             _current ??= _queue.Count > 0 ? _queue.Dequeue() : null;
             if (_current is null) return 0;
-
-            var count = Math.Min(buffer.Length, _current.Length - _currentOffset);
-            _current.AsSpan(_currentOffset, count).CopyTo(buffer);
-            _currentOffset += count;
-            _bufferedBytes -= count;
+            var copied = Math.Min(count, _current.Length - _currentOffset);
+            _current.AsSpan(_currentOffset, copied).CopyTo(buffer.AsSpan(offset, copied));
+            _currentOffset += copied;
+            _bufferedBytes -= copied;
             if (_currentOffset == _current.Length)
             {
                 _current = null;
                 _currentOffset = 0;
             }
             Monitor.PulseAll(_gate);
-            return count;
+            return copied;
         }
     }
 
@@ -79,6 +75,7 @@ public sealed class BoundedPcmWaveProvider : IWaveProvider, IDisposable
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _disposed = true;
             _queue.Clear();
             _current = null;

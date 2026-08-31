@@ -2,10 +2,6 @@
   <PropertyGroup>
     <AssemblyName>MeetingRecorder.Core</AssemblyName>
     <RootNamespace>MeetingRecorder.Core</RootNamespace>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>MeetingRecorder 的纯托管共享模型、协议与持久化层。</Description>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="ScreenRecorderLib" />
-    <PackageReference Include="NAudio.Wasapi" />
-  </ItemGroup>
 </Project>

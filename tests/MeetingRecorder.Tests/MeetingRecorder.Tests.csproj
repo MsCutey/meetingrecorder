@@ -14,8 +14,12 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="NAudio.Wasapi" />
+    <PackageReference Include="ScreenRecorderLib" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\MeetingRecorder.Core\MeetingRecorder.Core.csproj" />
+    <ProjectReference Include="..\..\src\MeetingRecorder.Engine\MeetingRecorder.Engine.csproj" />
+    <ProjectReference Include="..\..\src\MeetingRecorder.Worker\MeetingRecorder.Worker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

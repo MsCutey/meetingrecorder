@@ -21,6 +21,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private AudioDeviceInfo? _selectedMicrophoneDevice;
     private bool _captureSystemAudio = true;
     private bool _captureMicrophone = true;
+    private bool _excludeMainWindowFromDisplayCapture;
+    private bool _hasAcceptedCaptureProtectionWarning;
     private string _outputDirectory = AppSettings.DefaultOutputDirectory();
     private int _countdownSeconds = 3;
     private string _startStopHotKey = "Ctrl+Shift+F9";
@@ -38,6 +40,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _isInitialized;
     private bool _isSaving;
     private bool _disposed;
+    private bool _displayPreviewSuppressedForCurrentSession;
     private int _previewUpdatePending;
 
     public MainViewModel(IRecordingService recordingService, IAppRepository repository, IDesktopDialogService dialogs)
@@ -58,7 +61,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         BrowseOutputCommand = new RelayCommand(_ => BrowseOutput(), _ => IsEditingEnabled);
         OpenOutputCommand = new RelayCommand(_ => _dialogs.OpenFolder(OutputDirectory));
         OpenHistoryItemCommand = new RelayCommand(OpenHistoryItem);
-        RecoverCommand = new AsyncRelayCommand(RecoverAsync);
+        RecoverCommand = new AsyncRelayCommand(RecoverAsync, _ => IsEditingEnabled);
     }
 
     public ObservableCollection<CaptureTargetInfo> CaptureTargets { get; } = [];
@@ -82,8 +85,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand OpenHistoryItemCommand { get; }
     public AsyncRelayCommand RecoverCommand { get; }
 
-    public nint WindowToExclude { get; set; }
-
     public RecordingMode SelectedMode
     {
         get => _selectedMode;
@@ -93,6 +94,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(IsVideoMode));
             OnPropertyChanged(nameof(IsAudioOnlyMode));
             OnPropertyChanged(nameof(ModeDescription));
+            OnPropertyChanged(nameof(IsDisplayCaptureSelected));
             RefreshCommandStates();
             ScheduleSettingsSave();
         }
@@ -113,7 +115,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public CaptureTargetInfo? SelectedTarget
     {
         get => _selectedTarget;
-        set { if (SetProperty(ref _selectedTarget, value)) RefreshCommandStates(); }
+        set
+        {
+            if (!SetProperty(ref _selectedTarget, value)) return;
+            OnPropertyChanged(nameof(IsDisplayCaptureSelected));
+            RefreshCommandStates();
+        }
+    }
+
+    public bool IsDisplayCaptureSelected =>
+        IsVideoMode && SelectedTarget?.Kind == CaptureTargetKind.Display;
+
+    public bool ExcludeMainWindowFromDisplayCapture
+    {
+        get => _excludeMainWindowFromDisplayCapture;
+        set
+        {
+            if (value && !_hasAcceptedCaptureProtectionWarning)
+            {
+                var accepted = _dialogs.Confirm(
+                    "启用实验性防捕获功能",
+                    "启用后，MeetingRecorder 会在整屏录制期间尝试从录制画面中隐藏。\n\n" +
+                    "任务栏预览可能变黑，部分 Windows 或显卡环境可能暂时看不到主窗口。停止录制或重新启动应用后会恢复。\n\n" +
+                    "是否继续启用？");
+                if (!accepted)
+                {
+                    OnPropertyChanged(nameof(ExcludeMainWindowFromDisplayCapture));
+                    return;
+                }
+                _hasAcceptedCaptureProtectionWarning = true;
+            }
+
+            if (!SetProperty(ref _excludeMainWindowFromDisplayCapture, value)) return;
+            ScheduleSettingsSave();
+        }
     }
 
     public AudioDeviceInfo? SelectedSystemAudioDevice
@@ -199,6 +234,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(IsActivelyRecording));
             OnPropertyChanged(nameof(PrimaryButtonText));
             OnPropertyChanged(nameof(PauseButtonText));
+            OnPropertyChanged(nameof(PreviewPlaceholderText));
             RefreshCommandStates();
         }
     }
@@ -225,6 +261,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public double MicrophoneLevel { get => _microphoneLevel; private set => SetProperty(ref _microphoneLevel, value); }
     public ImageSource? PreviewImage { get => _previewImage; private set { if (SetProperty(ref _previewImage, value)) OnPropertyChanged(nameof(HasPreview)); } }
     public bool HasPreview => PreviewImage is not null;
+    public string PreviewPlaceholderText =>
+        _displayPreviewSuppressedForCurrentSession && State is not (RecordingState.Idle or RecordingState.Failed)
+            ? "为避免递归画面，整屏实时预览已关闭"
+            : "录制开始后显示低分辨率预览";
     public bool IsLoading { get => _isLoading; private set { if (SetProperty(ref _isLoading, value)) RefreshCommandStates(); } }
     public bool HasRecoveries => RecoveryCandidates.Count > 0;
     public string RecoveryBannerText => $"发现 {RecoveryCandidates.Count} 个异常中断的录制，可尝试恢复。";
@@ -242,15 +282,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             _loadedSettings = await _repository.LoadSettingsAsync();
             ApplySettings(_loadedSettings);
-            await Task.WhenAll(RefreshDevicesAsync(), RefreshHistoryAsync(), RefreshRecoveryAsync());
+            await Task.WhenAll(RefreshHistoryAsync(), RefreshRecoveryAsync());
+            var deviceWarning = await RefreshDevicesCoreAsync();
             _isInitialized = true;
-            StatusText = "准备就绪";
+            _loadedSettings = BuildSettings();
+            await _repository.SaveSettingsAsync(_loadedSettings);
+            StatusText = deviceWarning is null ? "准备就绪" : "设备检查完成 · 部分功能不可用";
+            WarningText = deviceWarning;
         }
         catch (Exception error)
         {
-            StatusText = "初始化失败";
+            _isInitialized = true;
+            StatusText = "设备检查失败 · 主界面仍可使用";
             WarningText = error.Message;
-            _dialogs.ShowError("初始化失败", error.Message);
+            _dialogs.ShowError("设备检查失败", error.Message + "\n\n主界面不会退出。请检查提示后点击“刷新设备”重试。");
         }
         finally
         {
@@ -280,6 +325,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (!await EnsureRecordingNoticeAsync()) return;
 
             WarningText = null;
+            _displayPreviewSuppressedForCurrentSession =
+                SelectedMode == RecordingMode.VideoAndAudio &&
+                SelectedTarget?.Kind == CaptureTargetKind.Display &&
+                !ExcludeMainWindowFromDisplayCapture;
+            OnPropertyChanged(nameof(PreviewPlaceholderText));
             var request = new RecordingRequest
             {
                 Mode = SelectedMode,
@@ -292,7 +342,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 OutputDirectory = OutputDirectory,
                 CountdownSeconds = CountdownSeconds,
                 PreferHardwareEncoding = true,
-                WindowToExclude = WindowToExclude
+                ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture
             };
             await _recordingService.StartAsync(request);
         }
@@ -333,6 +383,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task RefreshDevicesAsync()
     {
+        IsLoading = true;
+        try
+        {
+            var deviceWarning = await RefreshDevicesCoreAsync();
+            _loadedSettings = BuildSettings();
+            await _repository.SaveSettingsAsync(_loadedSettings);
+            StatusText = deviceWarning is null ? "设备已刷新" : "设备已刷新 · 部分功能不可用";
+            WarningText = deviceWarning;
+        }
+        catch (Exception error)
+        {
+            StatusText = "设备检查失败 · 主界面仍可使用";
+            WarningText = error.Message;
+            _dialogs.ShowError("刷新设备失败", error.Message);
+        }
+        finally { IsLoading = false; }
+    }
+
+    private async Task<string?> RefreshDevicesCoreAsync()
+    {
         var previousTarget = SelectedTarget?.Id;
         var previousSystem = SelectedSystemAudioDevice?.Id ?? _loadedSettings.SystemAudioDeviceId;
         var previousMicrophone = SelectedMicrophoneDevice?.Id ?? _loadedSettings.MicrophoneDeviceId;
@@ -353,6 +423,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                                    ?? MicrophoneDevices.FirstOrDefault();
         if (MicrophoneDevices.Count == 0) CaptureMicrophone = false;
         if (SystemAudioDevices.Count == 0) CaptureSystemAudio = false;
+        var warnings = new List<string>();
+        if (CaptureTargets.Count == 0) warnings.Add("未发现可录制的显示器或窗口，视频模式暂不可用。");
+        if (SystemAudioDevices.Count == 0) warnings.Add("未发现系统声音输出设备。");
+        if (MicrophoneDevices.Count == 0) warnings.Add("未发现可用麦克风。");
+        return warnings.Count == 0 ? null : string.Join(Environment.NewLine, warnings);
     }
 
     private async Task RefreshHistoryAsync()
@@ -412,7 +487,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             RecordingState.Failed => "录制异常 · 已保留恢复文件",
             _ => eventArgs.Current.ToString()
         };
-        if (eventArgs.Current == RecordingState.Idle) PreviewImage = null;
+        if (eventArgs.Current is RecordingState.Idle or RecordingState.Failed)
+        {
+            PreviewImage = null;
+            _displayPreviewSuppressedForCurrentSession = false;
+            OnPropertyChanged(nameof(PreviewPlaceholderText));
+        }
+        if (eventArgs.Current == RecordingState.Failed) _ = RefreshRecoveryAsync();
         RecordingActivityChanged?.Invoke(this, eventArgs.Current);
     });
 
@@ -433,6 +514,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnPreviewFrameAvailable(object? sender, PreviewFrameEventArgs eventArgs)
     {
+        if (_displayPreviewSuppressedForCurrentSession) return;
         if (Interlocked.Exchange(ref _previewUpdatePending, 1) != 0) return;
         RunOnUi(() =>
         {
@@ -466,6 +548,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _selectedQuality = settings.Quality;
         _captureSystemAudio = settings.CaptureSystemAudio;
         _captureMicrophone = settings.CaptureMicrophone;
+        _excludeMainWindowFromDisplayCapture = settings.ExcludeMainWindowFromDisplayCapture;
+        _hasAcceptedCaptureProtectionWarning = settings.HasAcceptedCaptureProtectionWarning;
         _outputDirectory = settings.OutputDirectory;
         _countdownSeconds = settings.CountdownSeconds;
         _startStopHotKey = settings.StartStopHotKey;
@@ -484,7 +568,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OutputDirectory = OutputDirectory,
         CountdownSeconds = CountdownSeconds,
         StartStopHotKey = StartStopHotKey,
-        PauseResumeHotKey = PauseResumeHotKey
+        PauseResumeHotKey = PauseResumeHotKey,
+        ExcludeMainWindowFromDisplayCapture = ExcludeMainWindowFromDisplayCapture,
+        HasAcceptedCaptureProtectionWarning = _hasAcceptedCaptureProtectionWarning
     };
 
     private void ScheduleSettingsSave()
@@ -518,6 +604,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         PauseResumeCommand.RaiseCanExecuteChanged();
         RefreshDevicesCommand.RaiseCanExecuteChanged();
         BrowseOutputCommand.RaiseCanExecuteChanged();
+        RecoverCommand.RaiseCanExecuteChanged();
     }
 
     private void RunOnUi(Action action)

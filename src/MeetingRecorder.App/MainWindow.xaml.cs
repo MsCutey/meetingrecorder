@@ -4,7 +4,9 @@ using System.Windows.Interop;
 using MeetingRecorder.App.Interop;
 using MeetingRecorder.App.Services;
 using MeetingRecorder.App.ViewModels;
+using MeetingRecorder.Core.Diagnostics;
 using MeetingRecorder.Core.Models;
+using MeetingRecorder.Core.Utilities;
 
 namespace MeetingRecorder.App;
 
@@ -12,18 +14,29 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
     private readonly IDesktopDialogService _dialogs;
+    private readonly RollingFileLogger _logger;
+    private readonly WindowCapturePresentationCoordinator _presentationCoordinator;
     private GlobalHotKeyManager? _hotKeys;
     private TrayIconController? _trayIcon;
     private bool _exitRequested;
     private bool _shownTrayNotice;
+    private bool _contentRenderedLogged;
+    private WindowState _restoreWindowState = WindowState.Normal;
 
-    public MainWindow(MainViewModel viewModel, IDesktopDialogService dialogs)
+    public MainWindow(
+        MainViewModel viewModel,
+        IDesktopDialogService dialogs,
+        RollingFileLogger logger,
+        WindowCapturePresentationCoordinator presentationCoordinator)
     {
         _viewModel = viewModel;
         _dialogs = dialogs;
+        _logger = logger;
+        _presentationCoordinator = presentationCoordinator;
         DataContext = viewModel;
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
+        ContentRendered += OnContentRendered;
         Loaded += OnLoaded;
         Closing += OnClosing;
         StateChanged += OnWindowStateChanged;
@@ -34,11 +47,19 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs eventArgs)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        _viewModel.WindowToExclude = handle;
+        _presentationCoordinator.SetWindowHandle(handle);
+        _logger.Info("capture-protection", "启动阶段不启用界面防捕获。");
         _hotKeys = new GlobalHotKeyManager(handle);
         _hotKeys.StartStopPressed += async (_, _) => await _viewModel.ExecutePrimaryAsync();
         _hotKeys.PauseResumePressed += async (_, _) => await _viewModel.ExecutePauseResumeAsync();
         _trayIcon = new TrayIconController(ShowFromTray, _viewModel.ExecutePrimaryAsync, _viewModel.ExecutePauseResumeAsync, ExitAsync);
+    }
+
+    private void OnContentRendered(object? sender, EventArgs eventArgs)
+    {
+        if (_contentRenderedLogged) return;
+        _contentRenderedLogged = true;
+        _logger.Info("main-window-rendered", $"visible={IsVisible}; state={WindowState}; width={ActualWidth:0}; height={ActualHeight:0}");
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs eventArgs)
@@ -68,7 +89,12 @@ public partial class MainWindow : Window
 
     private void OnWindowStateChanged(object? sender, EventArgs eventArgs)
     {
-        if (WindowState != WindowState.Minimized) return;
+        if (WindowState != WindowState.Minimized)
+        {
+            _restoreWindowState = WindowState;
+            return;
+        }
+        if (!RecordingWindowPolicy.ShouldEnterTray(WindowTrayAction.UserMinimized)) return;
         Hide();
         if (_shownTrayNotice) return;
         _trayIcon?.ShowMinimizedNotice();
@@ -78,7 +104,7 @@ public partial class MainWindow : Window
     private void ShowFromTray()
     {
         Show();
-        WindowState = WindowState.Normal;
+        WindowState = _restoreWindowState;
         Activate();
         Topmost = true;
         Topmost = false;
@@ -88,6 +114,7 @@ public partial class MainWindow : Window
     private void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
         if (_exitRequested) return;
+        if (!RecordingWindowPolicy.ShouldEnterTray(WindowTrayAction.UserClosed)) return;
         eventArgs.Cancel = true;
         Hide();
         if (_shownTrayNotice) return;
@@ -105,6 +132,8 @@ public partial class MainWindow : Window
         _hotKeys?.Dispose();
         _trayIcon?.Dispose();
         await _viewModel.DisposeAsync();
+        try { await _presentationCoordinator.RestoreAsync(); }
+        catch (Exception error) { _logger.Warning("capture-protection", $"退出前恢复窗口捕获状态失败：{error.Message}"); }
         System.Windows.Application.Current.Shutdown();
     }
 }

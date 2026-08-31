@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $Version = "1.0.0",
+    [string] $Version = "1.1.0",
     [string] $DotNet = "dotnet",
     [string] $MakeNsis = "makensis",
     [switch] $SkipInstaller
@@ -19,6 +19,7 @@ New-Item -ItemType Directory -Path $artifactsRoot | Out-Null
 
 $solution = Join-Path $repositoryRoot "MeetingRecorder.sln"
 $project = Join-Path $repositoryRoot "src\MeetingRecorder.App\MeetingRecorder.App.csproj"
+$workerProject = Join-Path $repositoryRoot "src\MeetingRecorder.Worker\MeetingRecorder.Worker.csproj"
 $tests = Join-Path $repositoryRoot "tests\MeetingRecorder.Tests\MeetingRecorder.Tests.csproj"
 $nuget = Join-Path $repositoryRoot "NuGet.config"
 $installedDirectory = Join-Path $artifactsRoot "MeetingRecorder-win-x64"
@@ -26,38 +27,44 @@ $portableDirectory = Join-Path $artifactsRoot "MeetingRecorder-portable-win-x64"
 $portableZip = Join-Path $artifactsRoot "MeetingRecorder-$Version-portable-win-x64.zip"
 $installerOutput = Join-Path $artifactsRoot "MeetingRecorder-$Version-Setup-win-x64.exe"
 $vcRedist = Join-Path $repositoryRoot "installer\prerequisites\vc_redist.x64.exe"
+if (-not (Test-Path -LiteralPath $vcRedist)) {
+    throw "正式发布必须包含 installer\prerequisites\vc_redist.x64.exe。请从微软官方下载 x64 安装程序后重试。"
+}
+$vcSignature = Get-AuthenticodeSignature -LiteralPath $vcRedist
+if ($vcSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+    $null -eq $vcSignature.SignerCertificate -or
+    $vcSignature.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+    throw "vc_redist.x64.exe 未通过 Microsoft Authenticode 签名校验，已拒绝生成正式发布包。"
+}
 
 & $DotNet restore $solution -p:Platform=x64 --configfile $nuget
 if ($LASTEXITCODE -ne 0) { throw "NuGet 还原失败。" }
 & $DotNet restore $project -r win-x64 -p:Platform=x64 --configfile $nuget
 if ($LASTEXITCODE -ne 0) { throw "win-x64 运行时包还原失败。" }
+& $DotNet restore $workerProject -r win-x64 -p:Platform=x64 --configfile $nuget
+if ($LASTEXITCODE -ne 0) { throw "Worker 的 win-x64 运行时包还原失败。" }
 & $DotNet test $tests -c Release -p:Platform=x64 --no-restore
 if ($LASTEXITCODE -ne 0) { throw "测试失败。" }
 & $DotNet publish $project -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:Version=$Version -p:PublishSingleFile=false --no-restore -o $installedDirectory
 if ($LASTEXITCODE -ne 0) { throw "自包含发布失败。" }
+$workerDirectory = Join-Path $installedDirectory "Worker"
+& $DotNet publish $workerProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:Version=$Version -p:PublishSingleFile=false --no-restore -o $workerDirectory
+if ($LASTEXITCODE -ne 0) { throw "自包含 Worker 发布失败。" }
 
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "README.md") -Destination $installedDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "THIRD-PARTY-NOTICES.txt") -Destination $installedDirectory
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "docs") -Destination (Join-Path $installedDirectory "docs") -Recurse
 Copy-Item -LiteralPath $installedDirectory -Destination $portableDirectory -Recurse
 New-Item -ItemType File -Path (Join-Path $portableDirectory "portable.marker") | Out-Null
-if (Test-Path -LiteralPath $vcRedist) {
-    $prerequisites = Join-Path $portableDirectory "prerequisites"
-    New-Item -ItemType Directory -Path $prerequisites | Out-Null
-    Copy-Item -LiteralPath $vcRedist -Destination $prerequisites
-}
-else {
-    Write-Warning "未找到 vc_redist.x64.exe；便携包不会包含 VC++ 运行库安装程序。"
-}
+$prerequisites = Join-Path $portableDirectory "prerequisites"
+New-Item -ItemType Directory -Path $prerequisites | Out-Null
+Copy-Item -LiteralPath $vcRedist -Destination $prerequisites
 Compress-Archive -Path (Join-Path $portableDirectory "*") -DestinationPath $portableZip -CompressionLevel Optimal
 
 if (-not $SkipInstaller) {
     $makeNsisCommand = Get-Command $MakeNsis -ErrorAction SilentlyContinue
     if ($null -eq $makeNsisCommand) {
-        Write-Warning "未找到 makensis，已跳过安装包；安装 NSIS 3 后重新运行即可。"
-    }
-    elseif (-not (Test-Path -LiteralPath $vcRedist)) {
-        Write-Warning "缺少 VC++ 运行库，已跳过离线安装包。"
+        throw "未找到 makensis，无法生成正式安装包。若只需要便携包，请显式传入 -SkipInstaller。"
     }
     else {
         $script = Join-Path $repositoryRoot "installer\MeetingRecorder.nsi"

@@ -23,7 +23,8 @@ public sealed class AppRepository : IAppRepository
     {
         try
         {
-            var settings = await _json.ReadAsync<AppSettings>(Paths.SettingsPath, cancellationToken).ConfigureAwait(false) ?? new AppSettings();
+            var settings = AppSettingsMigrator.Migrate(
+                await _json.ReadAsync<AppSettings>(Paths.SettingsPath, cancellationToken).ConfigureAwait(false) ?? new AppSettings());
             settings.Validate();
             return settings;
         }
@@ -127,18 +128,19 @@ public sealed class AppRepository : IAppRepository
             PreserveCorruptFile(Paths.ActiveSessionPath);
         }
 
+        var activeRecoveryPath = active?.EffectiveRecoveryMediaPath;
         if (active is not null &&
-            (File.Exists(active.PartialPath) || (active.RecoveryVideoPath is not null && File.Exists(active.RecoveryVideoPath))))
+            (File.Exists(active.PartialPath) || (activeRecoveryPath is not null && File.Exists(activeRecoveryPath))))
         {
             candidates[active.Id] = new RecoveryCandidate(
                 active.Id,
                 active.Mode,
                 active.FinalPath,
                 File.Exists(active.PartialPath) ? active.PartialPath : null,
-                active.RecoveryVideoPath is not null && File.Exists(active.RecoveryVideoPath) ? active.RecoveryVideoPath : null,
+                activeRecoveryPath is not null && File.Exists(activeRecoveryPath) ? activeRecoveryPath : null,
                 active.StartedAt);
             registeredPaths.Add(Path.GetFullPath(active.PartialPath));
-            if (active.RecoveryVideoPath is not null) registeredPaths.Add(Path.GetFullPath(active.RecoveryVideoPath));
+            if (activeRecoveryPath is not null) registeredPaths.Add(Path.GetFullPath(activeRecoveryPath));
         }
 
         var settings = await LoadSettingsAsync(cancellationToken).ConfigureAwait(false);
@@ -148,7 +150,7 @@ public sealed class AppRepository : IAppRepository
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (registeredPaths.Contains(Path.GetFullPath(path))) continue;
-                if (path.EndsWith(".recovery.partial.mp4", StringComparison.OrdinalIgnoreCase)) continue;
+                if (path.Contains(".recovery.partial.", StringComparison.OrdinalIgnoreCase)) continue;
                 var info = new FileInfo(path);
                 if (info.Length == 0) continue;
                 var mode = path.EndsWith(".m4a", StringComparison.OrdinalIgnoreCase) ? RecordingMode.AudioOnly : RecordingMode.VideoAndAudio;
@@ -156,17 +158,46 @@ public sealed class AppRepository : IAppRepository
                 if (candidates.ContainsKey(id)) continue;
                 var extension = mode == RecordingMode.AudioOnly ? ".m4a" : ".mp4";
                 var suggested = Path.Combine(info.DirectoryName!, id + extension);
-                var recovery = mode == RecordingMode.AudioOnly
-                    ? Path.Combine(info.DirectoryName!, id + ".recovery.partial.mp4")
-                    : null;
+                string? recovery = null;
+                if (mode == RecordingMode.AudioOnly)
+                {
+                    var recoveryMp3 = Path.Combine(info.DirectoryName!, id + ".recovery.partial.mp3");
+                    var legacyRecoveryMp4 = Path.Combine(info.DirectoryName!, id + ".recovery.partial.mp4");
+                    recovery = File.Exists(recoveryMp3) ? recoveryMp3 : File.Exists(legacyRecoveryMp4) ? legacyRecoveryMp4 : null;
+                }
                 candidates[id] = new RecoveryCandidate(id, mode, suggested, path, File.Exists(recovery) ? recovery : null, info.CreationTimeUtc);
+            }
+
+            var recoverySidecars = Directory.EnumerateFiles(settings.OutputDirectory, "会议录制_*.recovery.partial.mp3", SearchOption.TopDirectoryOnly)
+                .Concat(Directory.EnumerateFiles(settings.OutputDirectory, "会议录制_*.recovery.partial.mp4", SearchOption.TopDirectoryOnly));
+            foreach (var path in recoverySidecars)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (registeredPaths.Contains(Path.GetFullPath(path))) continue;
+                var info = new FileInfo(path);
+                if (info.Length == 0) continue;
+                var fileName = Path.GetFileName(path);
+                var suffix = path.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
+                    ? ".recovery.partial.mp3"
+                    : ".recovery.partial.mp4";
+                var id = fileName[..^suffix.Length];
+                if (candidates.ContainsKey(id)) continue;
+                var partial = Path.Combine(info.DirectoryName!, id + ".partial.m4a");
+                var suggested = Path.Combine(info.DirectoryName!, id + ".m4a");
+                candidates[id] = new RecoveryCandidate(
+                    id,
+                    RecordingMode.AudioOnly,
+                    suggested,
+                    File.Exists(partial) ? partial : null,
+                    path,
+                    info.CreationTimeUtc);
             }
         }
 
         return candidates.Values.OrderByDescending(candidate => candidate.StartedAt).ToArray();
     }
 
-    public Task<string> RecoverAsync(RecoveryCandidate candidate, CancellationToken cancellationToken = default)
+    public async Task<string> RecoverAsync(RecoveryCandidate candidate, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = SelectRecoverySource(candidate);
@@ -176,8 +207,13 @@ public sealed class AppRepository : IAppRepository
         }
 
         var desired = candidate.SuggestedPath;
-        if (source.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) && !desired.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+        if (source.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) && !desired.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase))
         {
+            desired = Path.ChangeExtension(desired, ".mp3");
+        }
+        else if (source.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) && !desired.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            // 兼容 V1.0.0 的音频恢复视频。
             desired = Path.ChangeExtension(desired, ".mp4");
         }
         var recovered = RecordingFileNameFactory.MakeRecoveredPath(desired);
@@ -192,14 +228,22 @@ public sealed class AppRepository : IAppRepository
             if (File.Exists(preserved)) preserved = RecordingFileNameFactory.MakeRecoveredPath(preserved);
             File.Move(unfinalized, preserved);
         }
-        if (File.Exists(Paths.ActiveSessionPath)) File.Delete(Paths.ActiveSessionPath);
-        return Task.FromResult(recovered);
+        try
+        {
+            var active = await _json.ReadAsync<ActiveSession>(Paths.ActiveSessionPath, cancellationToken).ConfigureAwait(false);
+            if (active?.Id == candidate.Id && File.Exists(Paths.ActiveSessionPath)) File.Delete(Paths.ActiveSessionPath);
+        }
+        catch (JsonException)
+        {
+            PreserveCorruptFile(Paths.ActiveSessionPath);
+        }
+        return recovered;
     }
 
     private static string? SelectRecoverySource(RecoveryCandidate candidate)
     {
         if (candidate.Mode == RecordingMode.AudioOnly &&
-            candidate.RecoveryVideoPath is { } audioRecovery &&
+            candidate.RecoveryMediaPath is { } audioRecovery &&
             File.Exists(audioRecovery) &&
             new FileInfo(audioRecovery).Length > 0)
         {
@@ -209,7 +253,7 @@ public sealed class AppRepository : IAppRepository
         {
             return partial;
         }
-        if (candidate.RecoveryVideoPath is { } recovery && File.Exists(recovery) && new FileInfo(recovery).Length > 0)
+        if (candidate.RecoveryMediaPath is { } recovery && File.Exists(recovery) && new FileInfo(recovery).Length > 0)
         {
             return recovery;
         }

@@ -117,6 +117,12 @@
                   <TextBox Text="30 fps（固定）" IsReadOnly="True" Background="#F9FAFB" />
                 </StackPanel>
               </Grid>
+              <CheckBox Margin="0,14,0,0"
+                        Content="整屏录制时隐藏 MeetingRecorder（实验性）"
+                        IsChecked="{Binding ExcludeMainWindowFromDisplayCapture}"
+                        IsEnabled="{Binding IsDisplayCaptureSelected}" />
+              <TextBlock Text="默认关闭。启用后任务栏预览可能变黑，部分电脑录制期间可能暂时看不到主窗口。"
+                         TextWrapping="Wrap" Foreground="#667085" FontSize="11" Margin="24,5,0,0" />
             </StackPanel>
           </Border>
 
@@ -182,7 +188,7 @@
                 </Style>
               </StackPanel.Style>
               <TextBlock Text="▣" Foreground="#475467" FontSize="38" HorizontalAlignment="Center" />
-              <TextBlock Text="录制开始后显示低分辨率预览" Foreground="#98A2B3" FontSize="12" Margin="0,8,0,0" />
+              <TextBlock Text="{Binding PreviewPlaceholderText}" Foreground="#98A2B3" FontSize="12" Margin="0,8,0,0" />
               <TextBlock Text="仅声音模式不会访问真实屏幕" Foreground="#667085" FontSize="11" Margin="0,4,0,0" />
             </StackPanel>
             <Border VerticalAlignment="Bottom" Background="#D9101826" Padding="15,10">

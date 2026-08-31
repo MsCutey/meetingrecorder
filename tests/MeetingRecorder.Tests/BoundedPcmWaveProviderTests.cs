@@ -1,4 +1,4 @@
-using MeetingRecorder.Core.Audio;
+using MeetingRecorder.Engine.Audio;
 
 namespace MeetingRecorder.Tests;
 
@@ -14,9 +14,9 @@ public sealed class BoundedPcmWaveProviderTests
         Assert.False(provider.TryWrite(second));
 
         var destination = new byte[64];
-        Assert.Equal(64, provider.Read(destination));
+        Assert.Equal(64, provider.Read(destination, 0, destination.Length));
         Assert.True(provider.TryWrite(second));
-        Assert.InRange(provider.BufferedBytes, 1, provider.MaxBufferedBytes);
+        Assert.InRange(provider.BufferedBytes, 1, provider.MaximumBufferedBytes);
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public sealed class BoundedPcmWaveProviderTests
         using var provider = new BoundedPcmWaveProvider(capacity: TimeSpan.FromSeconds(1));
         Assert.True(provider.TryWrite(new byte[32]));
         provider.Complete();
-        Assert.Equal(32, provider.Read(new byte[64]));
-        Assert.Equal(0, provider.Read(new byte[64]));
+        Assert.Equal(32, provider.Read(new byte[64], 0, 64));
+        Assert.Equal(0, provider.Read(new byte[64], 0, 64));
     }
 }

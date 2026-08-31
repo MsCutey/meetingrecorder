@@ -6,7 +6,7 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.1.0"
 !endif
 !ifndef APP_FILES
   !error "APP_FILES 未定义"
@@ -49,6 +49,30 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "MeetingRecorder contributors"
 
 Section "MeetingRecorder（必需）" SEC_MAIN
   SectionIn RO
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=vc_redist.x64.exe "${VC_REDIST}"
+  DetailPrint "检查并安装 Microsoft Visual C++ x64 运行库…"
+  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+  ${If} $0 != 0
+  ${AndIf} $0 != 1638
+  ${AndIf} $0 != 3010
+    MessageBox MB_ICONSTOP|MB_OK "Microsoft Visual C++ x64 运行库安装失败（代码 $0）。MeetingRecorder 尚未安装，请修复系统后重试。"
+    SetErrorLevel $0
+    Abort
+  ${EndIf}
+  ${If} $0 == 3010
+    SetRebootFlag true
+  ${EndIf}
+
+  ; 覆盖安装 V1.0.0 时移除原来与主界面同进程加载的录制库。
+  ; 用户数据位于 LocalAppData\MeetingRecorder，不会被这里的清理影响。
+  Delete "$INSTDIR\ScreenRecorderLib.dll"
+  Delete "$INSTDIR\ScreenRecorderLib.pdb"
+  Delete "$INSTDIR\ScreenRecorderLib.xml"
+  Delete "$INSTDIR\NAudio.Core.dll"
+  Delete "$INSTDIR\NAudio.Wasapi.dll"
+  RMDir /r "$INSTDIR\Worker"
   SetOutPath "$INSTDIR"
   File /r "${APP_FILES}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -63,17 +87,6 @@ Section "MeetingRecorder（必需）" SEC_MAIN
   CreateDirectory "$SMPROGRAMS\MeetingRecorder"
   CreateShortcut "$SMPROGRAMS\MeetingRecorder\MeetingRecorder.lnk" "$INSTDIR\MeetingRecorder.exe"
   CreateShortcut "$SMPROGRAMS\MeetingRecorder\卸载 MeetingRecorder.lnk" "$INSTDIR\Uninstall.exe"
-
-  InitPluginsDir
-  SetOutPath "$PLUGINSDIR"
-  File /oname=vc_redist.x64.exe "${VC_REDIST}"
-  DetailPrint "检查并安装 Microsoft Visual C++ x64 运行库…"
-  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
-  ${If} $0 != 0
-  ${AndIf} $0 != 1638
-  ${AndIf} $0 != 3010
-    MessageBox MB_ICONEXCLAMATION|MB_OK "VC++ 运行库返回代码 $0。MeetingRecorder 已安装，但首次运行前可能需要手动安装运行库。"
-  ${EndIf}
 SectionEnd
 
 Section /o "桌面快捷方式" SEC_DESKTOP

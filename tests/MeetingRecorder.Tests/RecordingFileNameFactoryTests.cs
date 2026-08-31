@@ -12,7 +12,7 @@ public sealed class RecordingFileNameFactoryTests
         var paths = RecordingFileNameFactory.Create("D:\\Records", RecordingMode.VideoAndAudio, timestamp, _ => false);
         Assert.Equal("会议录制_20260829_140509.mp4", Path.GetFileName(paths.FinalPath));
         Assert.Equal("会议录制_20260829_140509.partial.mp4", Path.GetFileName(paths.PartialPath));
-        Assert.Null(paths.RecoveryVideoPath);
+        Assert.Null(paths.RecoveryMediaPath);
     }
 
     [Fact]
@@ -23,6 +23,6 @@ public sealed class RecordingFileNameFactoryTests
         var paths = RecordingFileNameFactory.Create("D:\\Records", RecordingMode.AudioOnly, timestamp, path => path == occupied);
         Assert.Equal("会议录制_20260829_140509_1.m4a", Path.GetFileName(paths.FinalPath));
         Assert.EndsWith(".partial.m4a", paths.PartialPath, StringComparison.Ordinal);
-        Assert.EndsWith(".recovery.partial.mp4", paths.RecoveryVideoPath, StringComparison.Ordinal);
+        Assert.EndsWith(".recovery.partial.mp3", paths.RecoveryMediaPath, StringComparison.Ordinal);
     }
 }

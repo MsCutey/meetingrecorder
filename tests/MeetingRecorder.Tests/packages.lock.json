@@ -18,6 +18,21 @@
           "Microsoft.TestPlatform.TestHost": "17.14.1"
         }
       },
+      "NAudio.Wasapi": {
+        "type": "Direct",
+        "requested": "[2.2.1, )",
+        "resolved": "2.2.1",
+        "contentHash": "lFfXoqacZZe0WqNChJgGYI+XV/n/61LzPHT3C1CJp4khoxeo2sziyX5wzNYWeCMNbsWxFvT3b3iXeY1UYjBhZw==",
+        "dependencies": {
+          "NAudio.Core": "2.2.1"
+        }
+      },
+      "ScreenRecorderLib": {
+        "type": "Direct",
+        "requested": "[6.6.0, )",
+        "resolved": "6.6.0",
+        "contentHash": "u4//jvO39tRXRNqg6/1Ky+KWPmxGdBsJOfp0A1tz6jnJosozzUSYPM0eu3LzeHwZYXeBMJBhVTRLJJBM6CVNng=="
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.3, )",
@@ -56,21 +71,13 @@
       },
       "NAudio.Core": {
         "type": "Transitive",
-        "resolved": "3.0.1",
-        "contentHash": "3fJ6UnkoiNBeeczKd9OozvcE85FvtyYCykmfzEbFW0uB0uT2+keKdconUGkz9qYlhaq1RJDTFptXOooQBYLijA==",
-        "dependencies": {
-          "System.Numerics.Tensors": "9.0.0"
-        }
+        "resolved": "2.2.1",
+        "contentHash": "GgkdP6K/7FqXFo7uHvoqGZTJvW4z8g2IffhOO4JHaLzKCdDOUEzVKtveoZkCuUX8eV2HAINqi7VFqlFndrnz/g=="
       },
       "Newtonsoft.Json": {
         "type": "Transitive",
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
-      },
-      "System.Numerics.Tensors": {
-        "type": "Transitive",
-        "resolved": "9.0.0",
-        "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
       },
       "xunit.abstractions": {
         "type": "Transitive",
@@ -113,26 +120,15 @@
         }
       },
       "meetingrecorder.core": {
+        "type": "Project"
+      },
+      "meetingrecorder.engine": {
         "type": "Project",
         "dependencies": {
-          "NAudio.Wasapi": "[3.0.1, )",
-          "ScreenRecorderLib": "[7.0.0, )"
+          "MeetingRecorder.Core": "[1.1.0, )",
+          "NAudio.Wasapi": "[2.2.1, )",
+          "ScreenRecorderLib": "[6.6.0, )"
         }
-      },
-      "NAudio.Wasapi": {
-        "type": "CentralTransitive",
-        "requested": "[3.0.1, )",
-        "resolved": "3.0.1",
-        "contentHash": "1j8+HaeAJXFaDaIeVpnaahwAa3ZvMog2bswgmY1JSDysAbeehRx+PIeC0AbNyXZr5gvhu9PfOPD7xwuAEKJcbw==",
-        "dependencies": {
-          "NAudio.Core": "3.0.1"
-        }
-      },
-      "ScreenRecorderLib": {
-        "type": "CentralTransitive",
-        "requested": "[7.0.0, )",
-        "resolved": "7.0.0",
-        "contentHash": "BhJYgzsCTMXHr/ysg2fmThqYahhr26SFckCnhUCQdAkS0BDiXjHJaq06rIU3l2ivJPgcNX57ycAa3O3m28HACA=="
       }
     }
   }

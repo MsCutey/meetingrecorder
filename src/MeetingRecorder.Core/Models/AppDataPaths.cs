@@ -8,6 +8,8 @@ public sealed record AppDataPaths(
     string AssetsDirectory,
     bool IsPortable)
 {
+    public string LogsDirectory => Path.Combine(RootDirectory, "Logs");
+
     public static AppDataPaths Resolve(string? executableDirectory = null)
     {
         executableDirectory ??= AppContext.BaseDirectory;

@@ -70,7 +70,7 @@ public sealed record RecordingRequest
     public required string OutputDirectory { get; init; }
     public int CountdownSeconds { get; init; } = 3;
     public bool PreferHardwareEncoding { get; init; } = true;
-    public nint WindowToExclude { get; init; }
+    public bool ExcludeMainWindowFromDisplayCapture { get; init; }
 }
 
 public sealed record RecordingProgress(
@@ -102,8 +102,14 @@ public sealed record ActiveSession
     public required DateTimeOffset StartedAt { get; init; }
     public required string FinalPath { get; init; }
     public required string PartialPath { get; init; }
+    public string? RecoveryMediaPath { get; init; }
+    // 兼容 V1.0.0 已写入的 active-session.json。
     public string? RecoveryVideoPath { get; init; }
     public string Status { get; init; } = "Recording";
+    public int? WorkerExitCode { get; init; }
+    public string? FailureMessage { get; init; }
+
+    public string? EffectiveRecoveryMediaPath => RecoveryMediaPath ?? RecoveryVideoPath;
 }
 
 public sealed record RecoveryCandidate(
@@ -111,7 +117,7 @@ public sealed record RecoveryCandidate(
     RecordingMode Mode,
     string SuggestedPath,
     string? PartialMediaPath,
-    string? RecoveryVideoPath,
+    string? RecoveryMediaPath,
     DateTimeOffset StartedAt);
 
 public sealed class RecordingStateChangedEventArgs(RecordingState previous, RecordingState current) : EventArgs

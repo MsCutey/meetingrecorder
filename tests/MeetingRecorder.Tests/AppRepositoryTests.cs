@@ -11,25 +11,33 @@ public sealed class AppRepositoryTests : IDisposable
     public async Task SettingsAreWrittenAtomicallyAndReadBack()
     {
         var repository = CreateRepository();
-        var settings = new AppSettings { OutputDirectory = Path.Combine(_root, "Output"), CountdownSeconds = 5 };
+        var settings = new AppSettings
+        {
+            OutputDirectory = Path.Combine(_root, "Output"),
+            CountdownSeconds = 5,
+            ExcludeMainWindowFromDisplayCapture = true,
+            HasAcceptedCaptureProtectionWarning = true
+        };
         await repository.SaveSettingsAsync(settings);
         var loaded = await repository.LoadSettingsAsync();
         Assert.Equal(5, loaded.CountdownSeconds);
         Assert.Equal(settings.OutputDirectory, loaded.OutputDirectory);
+        Assert.True(loaded.ExcludeMainWindowFromDisplayCapture);
+        Assert.True(loaded.HasAcceptedCaptureProtectionWarning);
         Assert.False(File.Exists(repository.Paths.SettingsPath + ".tmp"));
     }
 
     [Fact]
-    public async Task AudioRecoveryPrefersPlayableTemporaryMp4()
+    public async Task AudioRecoveryPrefersPlayableTemporaryMp3()
     {
         var repository = CreateRepository();
         var output = Path.Combine(_root, "Output");
         Directory.CreateDirectory(output);
         await repository.SaveSettingsAsync(new AppSettings { OutputDirectory = output });
         var partialM4a = Path.Combine(output, "会议录制_20260829_120000.partial.m4a");
-        var recoveryMp4 = Path.Combine(output, "会议录制_20260829_120000.recovery.partial.mp4");
+        var recoveryMp3 = Path.Combine(output, "会议录制_20260829_120000.recovery.partial.mp3");
         await File.WriteAllBytesAsync(partialM4a, [1, 2, 3]);
-        await File.WriteAllBytesAsync(recoveryMp4, [4, 5, 6, 7]);
+        await File.WriteAllBytesAsync(recoveryMp3, [4, 5, 6, 7]);
         var session = new ActiveSession
         {
             Id = "session",
@@ -37,7 +45,7 @@ public sealed class AppRepositoryTests : IDisposable
             StartedAt = DateTimeOffset.Now,
             FinalPath = Path.Combine(output, "会议录制_20260829_120000.m4a"),
             PartialPath = partialM4a,
-            RecoveryVideoPath = recoveryMp4,
+            RecoveryMediaPath = recoveryMp3,
             Status = "Failed"
         };
         await repository.SaveActiveSessionAsync(session);
@@ -45,10 +53,29 @@ public sealed class AppRepositoryTests : IDisposable
         var candidate = Assert.Single(await repository.ScanRecoveryAsync());
         Assert.Equal("session", candidate.Id);
         var recovered = await repository.RecoverAsync(candidate);
-        Assert.EndsWith(".mp4", recovered, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".mp3", recovered, StringComparison.OrdinalIgnoreCase);
         Assert.True(File.Exists(recovered));
         Assert.True(File.Exists(partialM4a.Replace(".partial.m4a", ".unfinalized.m4a", StringComparison.OrdinalIgnoreCase)));
         Assert.False(File.Exists(repository.Paths.ActiveSessionPath));
+    }
+
+    [Fact]
+    public async Task LegacyV1AudioRecoveryMp4_IsStillDiscovered()
+    {
+        var repository = CreateRepository();
+        var output = Path.Combine(_root, "Output");
+        Directory.CreateDirectory(output);
+        await repository.SaveSettingsAsync(new AppSettings { OutputDirectory = output });
+        var partialM4a = Path.Combine(output, "会议录制_20260829_130000.partial.m4a");
+        var recoveryMp4 = Path.Combine(output, "会议录制_20260829_130000.recovery.partial.mp4");
+        await File.WriteAllBytesAsync(partialM4a, [1]);
+        await File.WriteAllBytesAsync(recoveryMp4, [2, 3]);
+
+        var candidate = Assert.Single(await repository.ScanRecoveryAsync());
+
+        Assert.Equal(recoveryMp4, candidate.RecoveryMediaPath);
+        var recovered = await repository.RecoverAsync(candidate);
+        Assert.EndsWith(".mp4", recovered, StringComparison.OrdinalIgnoreCase);
     }
 
     private AppRepository CreateRepository()

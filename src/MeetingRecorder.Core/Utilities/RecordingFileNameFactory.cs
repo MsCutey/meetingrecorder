@@ -4,7 +4,7 @@ namespace MeetingRecorder.Core.Utilities;
 
 public static class RecordingFileNameFactory
 {
-    public static (string FinalPath, string PartialPath, string? RecoveryVideoPath) Create(
+    public static (string FinalPath, string PartialPath, string? RecoveryMediaPath) Create(
         string directory,
         RecordingMode mode,
         DateTimeOffset timestamp,
@@ -22,7 +22,7 @@ public static class RecordingFileNameFactory
             var finalPath = Path.Combine(directory, uniqueStem + extension);
             var partialPath = Path.Combine(directory, uniqueStem + ".partial" + extension);
             var recoveryPath = mode == RecordingMode.AudioOnly
-                ? Path.Combine(directory, uniqueStem + ".recovery.partial.mp4")
+                ? Path.Combine(directory, uniqueStem + ".recovery.partial.mp3")
                 : null;
             if (!pathExists(finalPath) && !pathExists(partialPath) && (recoveryPath is null || !pathExists(recoveryPath)))
             {

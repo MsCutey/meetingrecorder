@@ -4,7 +4,9 @@ namespace MeetingRecorder.Core.Models;
 
 public sealed record AppSettings
 {
-    public int SchemaVersion { get; init; } = 1;
+    public const int CurrentSchemaVersion = 2;
+
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public string OutputDirectory { get; init; } = DefaultOutputDirectory();
     public RecordingMode Mode { get; init; } = RecordingMode.VideoAndAudio;
     public VideoQualityPreset Quality { get; init; } = VideoQualityPreset.FullHd;
@@ -17,6 +19,8 @@ public sealed record AppSettings
     public string PauseResumeHotKey { get; init; } = "Ctrl+Shift+F10";
     public bool MinimizeToTray { get; init; } = true;
     public bool HasAcceptedRecordingNotice { get; init; }
+    public bool ExcludeMainWindowFromDisplayCapture { get; init; }
+    public bool HasAcceptedCaptureProtectionWarning { get; init; }
 
     public static string DefaultOutputDirectory()
     {
@@ -31,6 +35,10 @@ public sealed record AppSettings
 
     public void Validate()
     {
+        if (SchemaVersion != CurrentSchemaVersion)
+        {
+            throw new InvalidDataException($"不支持的设置版本：{SchemaVersion}。");
+        }
         if (CountdownSeconds is < 0 or > 30)
         {
             throw new InvalidDataException("倒计时必须在 0 到 30 秒之间。");

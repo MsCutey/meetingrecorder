@@ -16,6 +16,8 @@ public sealed class RecordingClockTests
         clock.Resume();
         time.Advance(TimeSpan.FromSeconds(7));
         Assert.Equal(TimeSpan.FromSeconds(17), clock.Stop());
+        Assert.Equal(TimeSpan.FromSeconds(17), clock.Elapsed);
+        Assert.Equal(TimeSpan.FromSeconds(17), clock.Stop());
     }
 
     private sealed class ManualTimeProvider : TimeProvider

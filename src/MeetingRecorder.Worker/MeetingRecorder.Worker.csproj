@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>MeetingRecorder.Worker</AssemblyName>
+    <RootNamespace>MeetingRecorder.Worker</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MeetingRecorder.Core\MeetingRecorder.Core.csproj" />
+    <ProjectReference Include="..\MeetingRecorder.Engine\MeetingRecorder.Engine.csproj" />
+  </ItemGroup>
+</Project>
