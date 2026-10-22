@@ -23,3 +23,8 @@ installer/prerequisites/
 
 # Patch backups
 *.orig
+
+# Native macOS build output
+macos/.build/
+macos/.swiftpm/
+.DS_Store

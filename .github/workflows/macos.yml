@@ -1,0 +1,35 @@
+name: macOS build
+
+on:
+  push:
+    paths: ['macos/**', 'scripts/build-macos.sh', '.github/workflows/macos.yml']
+  pull_request:
+    paths: ['macos/**', 'scripts/build-macos.sh', '.github/workflows/macos.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test and package native app
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: bash scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetingRecorder-macOS-${{ matrix.arch }}
+          path: |
+            artifacts/MeetingRecorder-1.2.0-macOS-${{ matrix.arch }}.zip
+            artifacts/SHA256SUMS-macOS-${{ matrix.arch }}.txt

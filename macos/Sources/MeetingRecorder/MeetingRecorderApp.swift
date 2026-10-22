@@ -1,0 +1,213 @@
+import AppKit
+import SwiftUI
+
+@main struct MeetingRecorderApp: App {
+    @StateObject private var model = RecorderModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
+    var body: some Scene {
+        WindowGroup("MeetingRecorder · 会议录屏", id: "main") {
+            ContentView(model: model)
+                .task {
+                    delegate.model = model
+                    if CommandLine.arguments.contains("--smoke-test") {
+                        await SmokeTest.run(model)
+                    } else if CGPreflightScreenCaptureAccess() {
+                        await model.refresh()
+                    }
+                }
+        }
+        .defaultSize(width: 940, height: 720)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button(model.isBusy ? "停止并保存" : "开始录制") {
+                    Task { if model.canPause { await model.stop() } else { await model.start() } }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(model.state == .preparing || model.state == .finishing)
+                Button(model.state == .paused ? "继续录制" : "暂停录制") { model.pauseResume() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift]).disabled(!model.canPause)
+                Button("切换麦克风静音") { model.toggleMicrophone() }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                    .disabled(!model.canPause || !model.settings.microphone)
+            }
+        }
+        MenuBarExtra {
+            Text("MeetingRecorder · \(model.state.rawValue)")
+            if model.isBusy { Text(model.elapsedText) }
+            Button("显示主窗口") {
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = NSApp.windows.first(where: { $0.canBecomeMain }) { window.makeKeyAndOrderFront(nil) }
+            }
+            Divider()
+            Button(model.isBusy ? "停止并保存" : "开始录制") {
+                Task { if model.canPause { await model.stop() } else { await model.start() } }
+            }.disabled(model.state == .preparing || model.state == .finishing)
+            Button(model.state == .paused ? "继续录制" : "暂停录制") { model.pauseResume() }.disabled(!model.canPause)
+            Button(model.microphoneMuted ? "开启麦克风" : "静音麦克风") { model.toggleMicrophone() }
+                .disabled(!model.canPause || !model.settings.microphone)
+            Divider()
+            Button("退出") { NSApp.terminate(nil) }
+        } label: {
+            Label(model.canPause ? model.elapsedText : "MeetingRecorder",
+                  systemImage: model.state == .recording ? "record.circle.fill" : "record.circle")
+        }
+    }
+}
+
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var model: RecorderModel?
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let model, model.isBusy else { return .terminateNow }
+        if !model.canPause {
+            let alert = NSAlert()
+            alert.messageText = "请等待准备或保存完成后再退出。"
+            alert.runModal()
+            return .terminateCancel
+        }
+        Task { await model.stop(); sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil) }
+        return true
+    }
+}
+
+struct ContentView: View {
+    @ObservedObject var model: RecorderModel
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("MeetingRecorder").font(.title2.bold())
+                    Text("本地会议录制 · macOS").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Circle().fill(model.state == .recording ? .red : model.state == .paused ? .orange : .gray)
+                    .frame(width: 9, height: 9)
+                Text(model.countdownRemaining > 0 ? "\(model.countdownRemaining) 秒后开始" : model.state.rawValue)
+            }.padding(22)
+            Divider()
+            HSplitView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        GroupBox("录制模式") {
+                            Picker("模式", selection: $model.settings.audioOnly) {
+                                Text("视频 + 声音 · MP4").tag(false)
+                                Text("仅声音 · M4A").tag(true)
+                            }.pickerStyle(.segmented).labelsHidden().padding(10)
+                        }
+                        GroupBox("画面来源") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Button(model.loading ? "正在读取…" : "授权并刷新来源", systemImage: "arrow.clockwise") {
+                                        Task { await model.refresh() }
+                                    }.disabled(model.loading)
+                                    Button("权限设置") { model.openPrivacySettings() }
+                                }
+                                if !model.targets.isEmpty {
+                                    Picker("来源", selection: $model.sourceID) {
+                                        ForEach(model.targets) { Text($0.title).tag($0.id) }
+                                    }.disabled(model.settings.audioOnly)
+                                }
+                                Picker("画质", selection: $model.settings.maxHeight) {
+                                    Text("1080p").tag(1080); Text("720p").tag(720); Text("源分辨率").tag(16384)
+                                }.disabled(model.settings.audioOnly)
+                                Toggle("整屏录制时排除本应用", isOn: $model.settings.excludeApp)
+                                    .disabled(model.settings.audioOnly)
+                                Text(model.settings.audioOnly ? "仅声音模式不读取或保存视频帧，系统声音仍需屏幕与系统音频权限。" : "30 fps · H.264。窗口录制的系统声音限于所属应用。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(10)
+                        }
+                        GroupBox("声音来源") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle("系统声音", isOn: $model.settings.systemAudio)
+                                Toggle("麦克风", isOn: $model.settings.microphone)
+                                if model.settings.microphone {
+                                    Picker("输入设备", selection: $model.settings.microphoneID) {
+                                        Text("系统默认").tag("")
+                                        ForEach(model.microphones, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+                                    }
+                                    Toggle("开始时静音麦克风", isOn: $model.settings.startMuted)
+                                }
+                                Text("双路声音导出为一条混音音轨。建议佩戴耳机，减少回声。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(10)
+                        }
+                        GroupBox("保存与控制") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(model.settings.outputDirectory).font(.caption).textSelection(.enabled)
+                                HStack {
+                                    Button("选择目录…") { model.chooseDirectory() }
+                                    Picker("倒计时", selection: $model.settings.countdown) {
+                                        Text("无").tag(0); Text("3 秒").tag(3); Text("5 秒").tag(5)
+                                    }
+                                }
+                                Text("应用内快捷键：⇧⌘R 开始／停止，⇧⌘P 暂停／继续，⇧⌘M 麦克风。后台可用菜单栏控制。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(10)
+                        }
+                    }.padding(20).disabled(model.isBusy)
+                }.frame(minWidth: 440, idealWidth: 480)
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label(model.settings.audioOnly ? "音频录制" : "屏幕与窗口录制",
+                              systemImage: model.settings.audioOnly ? "waveform" : "display")
+                            .font(.headline)
+                        Text(model.elapsedText).font(.system(size: 42, weight: .medium, design: .monospaced))
+                        Text(String(format: "可用磁盘空间 %.1f GB", model.freeGB)).font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                    HStack {
+                        Text("录制历史").font(.headline)
+                        Spacer()
+                        Button("打开目录", systemImage: "folder") { NSWorkspace.shared.open(model.outputDirectory) }
+                    }
+                    if !model.recoveries.isEmpty {
+                        ForEach(model.recoveries, id: \.path) { url in
+                            HStack {
+                                Text("发现未完成录制").font(.caption).foregroundStyle(.orange)
+                                Spacer()
+                                Button("尝试恢复") { Task { await model.recover(url) } }.disabled(model.isBusy)
+                            }
+                        }
+                    }
+                    if model.history.isEmpty {
+                        ContentUnavailableView("暂无录制", systemImage: "record.circle", description: Text("完成录制后会在这里显示本地文件。"))
+                    } else {
+                        List(model.history, id: \.path) { url in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(url.lastPathComponent).font(.subheadline).lineLimit(2)
+                                HStack {
+                                    Button("播放") { NSWorkspace.shared.open(url) }
+                                    Button("定位") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy)
+                                }.buttonStyle(.borderless).font(.caption)
+                            }.padding(.vertical, 6)
+                        }.listStyle(.inset)
+                    }
+                    Spacer(minLength: 0)
+                }.padding(20).frame(minWidth: 330)
+            }
+            Divider()
+            HStack(alignment: .center, spacing: 12) {
+                Text(model.message).font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                if model.canPause {
+                    if model.settings.microphone {
+                        Button(model.microphoneMuted ? "开启麦克风" : "静音麦克风") { model.toggleMicrophone() }
+                    }
+                    Button(model.state == .paused ? "继续" : "暂停") { model.pauseResume() }
+                    Button("停止并保存", role: .destructive) { Task { await model.stop() } }.buttonStyle(.borderedProminent)
+                } else {
+                    if model.isBusy { ProgressView().controlSize(.small) }
+                    Button("开始录制", systemImage: "record.circle") { Task { await model.start() } }
+                        .buttonStyle(.borderedProminent).disabled(model.isBusy || model.loading)
+                }
+            }.padding(18)
+        }.frame(minWidth: 850, minHeight: 650)
+    }
+}
