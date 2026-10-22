@@ -13,6 +13,8 @@
 
 开发中反复覆盖同一 `.app` 会改变 ad-hoc 签名，系统可能继续按旧签名拒绝访问，即使权限开关已打开。请先固定最终应用，再完成授权，不要在已授权的副本上继续编译覆盖；必要时只重置本应用的旧记录：`tccutil reset ScreenCapture com.mscutey.meetingrecorder`，然后重新打开最终应用并授权。该操作不绕过授权。具体已验证与待验证范围见 [验收记录](../docs/ACCEPTANCE-macOS.md)。
 
+权限列表中，上方“录屏与系统录音”和下方“仅系统录音”是独立入口，录屏需要开启上方入口。使用台前调度录窗口时，请让目标窗口保持在当前台前组；被缩成缩略图或最小化时，系统可能挂起画面，且初始缩略尺寸可能降低录制分辨率。无法保持目标窗口活动时，建议使用整屏模式。
+
 ## 功能与范围
 
 - 显示器或窗口录制，H.264 视频、AAC 声音，导出 MP4；1080p / 720p / 源分辨率，上限 30 fps，保留比例。
@@ -46,4 +48,4 @@ artifacts/macos-release-arm64/MeetingRecorder.app/Contents/MacOS/MeetingRecorder
   --smoke-test /tmp/meetingrecorder-test --pause
 ```
 
-试录约 6 秒有效内容，中间暂停 2 秒。输出媒体、`smoke-result.json` 和视频帧 PNG。可附加 `--audio-only`、`--window --window-title '测试窗口标题'`、`--with-microphone`、`--expect-sound` 或 `--no-system-audio`。`--expect-sound` 会解码检查非静音音频；报告的 `success` 才是测试结果，不能只看进程退出码。请先完成系统权限授权，播放测试声音后检查音轨内容，完成后自行删除试录文件。测试程序不会绕过权限。独立试音程序应正常启动为单独应用，避免与命令行录制进程共用音频归属而被排除。
+试录约 6 秒有效内容，中间暂停 2 秒。输出媒体、`smoke-result.json` 和视频帧 PNG。可附加 `--audio-only`、`--window main --window-title '测试窗口标题'`、`--with-microphone`、`--expect-sound` 或 `--no-system-audio`。`--expect-sound` 会解码检查非静音音频；报告的 `success` 才是测试结果，不能只看进程退出码。请先完成系统权限授权，播放测试声音后检查音轨内容，完成后自行删除试录文件。测试程序不会绕过权限。独立试音程序应正常启动为单独应用，避免与命令行录制进程共用音频归属而被排除。窗口试录可以用 `open -g -n -W MeetingRecorder.app --args ...` 在后台启动录制器，保持测试窗口活动。
