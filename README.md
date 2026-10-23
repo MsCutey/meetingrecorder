@@ -8,6 +8,8 @@
 
 安装、权限、构建和功能差异见 [macOS 使用与开发说明](macos/README.md)。预编译包见 [Releases](https://github.com/MsCutey/meetingrecorder/releases)。
 
+当前功能分支增加 macOS **会后纪要实验版**：从录制历史或本地音视频生成转写，再整理概要、决策和待办。转写与总结分别配置云端 API，包含 DeepSeek 总结预设；只有主动确认处理才发送音轨/文本。支持转写断点继续、纪要编辑、Markdown 导出，以及复制转写到 ChatGPT 手动使用订阅。调研、方案比较及正式 ChatGPT 订阅登录的可行性见 [AI 会议纪要调研](docs/AI-MEETING-NOTES.md)。此分支尚待验收合并，不代表已发布版本。
+
 ```bash
 bash scripts/build-macos.sh
 open artifacts/macos-release-arm64/MeetingRecorder.app
