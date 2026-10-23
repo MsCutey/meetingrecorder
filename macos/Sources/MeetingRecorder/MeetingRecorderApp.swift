@@ -62,15 +62,14 @@ import SwiftUI
     weak var notes: MeetingNotesModel?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if notes?.isBusy == true {
+        if notes?.hasPendingWork == true {
             let alert = NSAlert()
-            alert.messageText = "会后纪要正在处理"
+            alert.messageText = "会后纪要或 ChatGPT 登录正在处理"
             alert.informativeText = "请先取消处理或等待完成，再退出。已完成的转写分段会保留。"
             alert.runModal()
             return .terminateCancel
         }
-        notes?.saveEdits()
-        if let notes, notes.summaryDraft != (notes.document?.summary ?? "") {
+        if let notes, !notes.preserveEditsBeforeLeaving() {
             let alert = NSAlert()
             alert.messageText = "纪要修改尚未保存"
             alert.informativeText = "请保存修改或导出后再退出。"
@@ -102,7 +101,7 @@ struct ContentView: View {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("MeetingRecorder").font(.title2.bold())
-                    Text("本地会议录制 · macOS").font(.subheadline).foregroundStyle(.secondary)
+                    Text("本地会议录制 · macOS · AI 纪要预览").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Circle().fill(model.state == .recording ? .red : model.state == .paused ? .orange : .gray)

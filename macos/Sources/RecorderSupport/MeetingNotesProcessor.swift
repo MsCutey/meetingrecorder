@@ -43,15 +43,32 @@ public struct MeetingNotesProcessor {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MeetingRecorder-Notes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        try Task.checkCancellation()
+        try MeetingNotesStore.prepareToSave(document, for: source)
         for index in document.segments.count..<audio.chunks.count {
             try Task.checkCancellation()
             let range = audio.chunks[index]
             await progress("正在准备音频 \(index + 1)/\(audio.chunks.count)…")
             let file = directory.appendingPathComponent("chunk.m4a")
-            try await export(source, range, file)
+            let hasAudio: Bool
+            do {
+                try await export(source, range, file)
+                hasAudio = true
+            } catch MeetingAudioError.noAudioInRange {
+                // A video can extend beyond its audio track or begin before audio starts.
+                // Such a range is valid silence and must not block later speech.
+                hasAudio = false
+            }
             try Task.checkCancellation()
-            await progress("正在转写 \(index + 1)/\(audio.chunks.count)…")
-            let text = try await recognize(file, configuration, apiKey)
+            guard try document.matches(source: source) else { throw MeetingNotesError("处理期间录音已变化，请重新转写。") }
+            let text: String
+            if hasAudio {
+                await progress("正在转写 \(index + 1)/\(audio.chunks.count)…")
+                text = try await recognize(file, configuration, apiKey)
+            } else {
+                await progress("音频 \(index + 1)/\(audio.chunks.count) 无音轨，已跳过上传。")
+                text = ""
+            }
             try Task.checkCancellation()
             // Reject a replaced or edited recording before checkpointing its transcript.
             guard try document.matches(source: source) else { throw MeetingNotesError("处理期间录音已变化，请重新转写。") }
@@ -60,19 +77,29 @@ public struct MeetingNotesProcessor {
             document.transcriptComplete = index == audio.chunks.count - 1
             document.updatedAt = Date()
             try MeetingNotesStore.save(document, for: source)
-            try FileManager.default.removeItem(at: file)
+            if hasAudio { try FileManager.default.removeItem(at: file) }
         }
         return document
     }
 
     public func summarize(source: URL, configuration: AIServiceConfiguration, apiKey: String) async throws -> MeetingNotesDocument {
+        try await summarize(source: source, configuration: configuration) { transcript in
+            try await summarizeText(transcript, configuration, apiKey)
+        }
+    }
+
+    /// Alternate providers share the same checkpoint and draft-preservation rules without
+    /// passing their credentials through the API-key chat-completions client.
+    public func summarize(source: URL, configuration: AIServiceConfiguration,
+                          generate: @escaping (String) async throws -> String) async throws -> MeetingNotesDocument {
         try Task.checkCancellation()
         guard var document = try MeetingNotesStore.load(for: source), document.transcriptComplete,
               try document.matches(source: source) else {
             throw MeetingNotesError("请先完成当前录音的转写。")
         }
         guard document.hasSpeech else { throw MeetingNotesError("未识别到可总结的文字，请检查录音。") }
-        let summary = try await summarizeText(document.transcript, configuration, apiKey)
+        try MeetingNotesStore.prepareToSave(document, for: source)
+        let summary = try await generate(document.transcript)
         try Task.checkCancellation()
         guard try document.matches(source: source) else { throw MeetingNotesError("处理期间录音已变化，结果未覆盖旧纪要。") }
         document.summary = summary; document.summaryService = configuration; document.updatedAt = Date()

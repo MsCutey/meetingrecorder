@@ -112,4 +112,16 @@ public enum MeetingNotesStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(document).write(to: url(for: source), options: .atomic)
     }
+
+    /// Exercise the actual atomic destination before a billed request. Existing notes are
+    /// rewritten byte-for-byte so a failed restart or summary leaves the previous draft intact.
+    /// This cannot guarantee space remains available for a later, larger checkpoint.
+    static func prepareToSave(_ document: MeetingNotesDocument, for source: URL) throws {
+        let location = url(for: source)
+        if FileManager.default.fileExists(atPath: location.path) {
+            try Data(contentsOf: location).write(to: location, options: .atomic)
+        } else {
+            try save(document, for: source)
+        }
+    }
 }

@@ -138,6 +138,30 @@ import Testing
     #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
 }
 
+@Test func videoTailWithoutAudioIsCheckpointedWithoutAnUpload() async throws {
+    let directory = try audioTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let tone = directory.appendingPathComponent("speech.wav")
+    let video = directory.appendingPathComponent("screen.mov")
+    let recording = directory.appendingPathComponent("recording.mov")
+    try writeTestTone(to: tone, duration: 1)
+    try await writeSilentTestVideo(to: video, duration: 301)
+    try await combineTestTracks([tone, video], to: recording)
+    var calls = 0
+    var processor = MeetingNotesProcessor()
+    processor.recognize = { _, _, _ in calls += 1; return "第一秒的发言。" }
+    let result = try await processor.transcribe(source: recording,
+        configuration: .init(baseURL: "https://speech.example/v1", model: "fixture"), apiKey: "fixture-key", progress: { _ in })
+    #expect(calls == 1)
+    #expect(result.transcriptComplete)
+    #expect(result.hasSpeech)
+    #expect(result.segments.count == 2)
+    #expect(result.segments.last?.start == 300)
+    #expect(result.segments.last?.end == 301)
+    #expect(result.segments.last?.text == "")
+    #expect(try MeetingNotesStore.load(for: recording)?.transcriptComplete == true)
+}
+
 private func audioTestDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MeetingAudioTests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

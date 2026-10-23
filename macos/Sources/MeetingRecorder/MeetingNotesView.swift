@@ -14,12 +14,10 @@ struct MeetingNotesView: View {
                 }
                 Spacer()
                 Button("选择文件", systemImage: "doc.badge.plus") { model.importRecording() }.disabled(model.isBusy)
-                Button("关闭") {
-                    model.saveEdits()
-                    if model.summaryDraft == (model.document?.summary ?? "") { model.isPresented = false }
-                }.disabled(model.isBusy)
+                Button("关闭") { model.close() }.disabled(model.hasPendingWork)
             }
             DisclosureGroup("AI 服务设置", isExpanded: $model.showsSettings) {
+              ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("录制默认仅保存在本机。会后处理时会发送音轨和转写文字至下列服务，可能产生 API 费用。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -27,33 +25,46 @@ struct MeetingNotesView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("1 · 语音转写").font(.headline)
                             TextField("基础地址，例如 https://api.openai.com/v1", text: $model.settings.transcription.baseURL)
-                                .onChange(of: model.settings.transcription.baseURL) { model.loadKey(role: "transcription") }
+                                .onSubmit { model.loadKeyIfNeeded(role: "transcription") }
                             TextField("转写模型", text: $model.settings.transcription.model)
                             SecureField("转写 API Key", text: $model.transcriptionKey)
+                            Button("读取已保存的转写 Key") { model.loadKey(role: "transcription") }.font(.caption)
                             Text("兼容 audio/transcriptions，支持 M4A、JSON 返回。")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("转写需要独立 API Key；ChatGPT 订阅登录仅用于右侧的文字总结。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         VStack(alignment: .leading, spacing: 8) {
+                            Text("2 · 纪要总结").font(.headline)
+                            Picker("使用方式", selection: $model.settings.useChatGPTSubscription) {
+                                Text("API Key").tag(false)
+                                Text("ChatGPT 订阅").tag(true)
+                            }.pickerStyle(.segmented).labelsHidden()
+                            if model.settings.useChatGPTSubscription {
+                                ChatGPTConnectionView(model: model.chatGPT)
+                            } else {
                             HStack {
-                                Text("2 · 纪要总结").font(.headline)
+                                Text("服务商预设").font(.subheadline)
                                 Spacer()
                                 Menu("预设") {
                                     Button("DeepSeek") {
                                         model.settings.summary = AIServiceConfiguration(baseURL: "https://api.deepseek.com", model: "deepseek-flash")
-                                        model.loadKey(role: "summary")
+                                        model.loadKeyIfNeeded(role: "summary")
                                     }
                                     Button("OpenAI API") {
                                         model.settings.summary = AIServiceConfiguration(baseURL: "https://api.openai.com/v1", model: "gpt-5.4-mini")
-                                        model.loadKey(role: "summary")
+                                        model.loadKeyIfNeeded(role: "summary")
                                     }
                                 }.fixedSize()
                             }
                             TextField("基础地址，例如 https://api.deepseek.com", text: $model.settings.summary.baseURL)
-                                .onChange(of: model.settings.summary.baseURL) { model.loadKey(role: "summary") }
+                                .onSubmit { model.loadKeyIfNeeded(role: "summary") }
                             TextField("总结模型", text: $model.settings.summary.model)
                             SecureField("总结 API Key", text: $model.summaryKey)
+                            Button("读取已保存的总结 Key") { model.loadKey(role: "summary") }.font(.caption)
                             Text("兼容 Chat Completions；此处 Key 按 API 用量计费。")
                                 .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }.textFieldStyle(.roundedBorder)
                     HStack {
@@ -62,6 +73,7 @@ struct MeetingNotesView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.top, 8)
+              }.frame(height: 270)
             }.disabled(model.isBusy)
             Divider()
             HStack {
@@ -127,6 +139,6 @@ struct MeetingNotesView: View {
                 }
             }
         }.padding(22).frame(minWidth: 850, idealWidth: 950, minHeight: 680, idealHeight: 780)
-            .interactiveDismissDisabled(model.isBusy || model.summaryDraft != (model.document?.summary ?? ""))
+            .interactiveDismissDisabled(model.hasPendingWork || model.hasUnprotectedEdits)
     }
 }

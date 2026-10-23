@@ -212,27 +212,44 @@ public final class MeetingAIClient {
 
     private func perform(_ request: URLRequest) async throws -> Data {
         try Task.checkCancellation()
-        let data: Data
-        let response: URLResponse
-        do { (data, response) = try await session.data(for: request) }
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            // Cancel on every early exit, including an oversized stream with no end marker.
+            defer { bytes.task.cancel() }
+            try Task.checkCancellation()
+            guard let http = response as? HTTPURLResponse else { throw MeetingAIError.invalidResponse }
+            switch http.statusCode {
+            case 200..<300: break
+            case 401: throw MeetingAIError.authenticationFailed
+            case 403: throw MeetingAIError.permissionDenied
+            case 429: throw MeetingAIError.rateLimited
+            case 500..<600: throw MeetingAIError.serviceUnavailable
+            default: throw MeetingAIError.httpStatus(http.statusCode)
+            }
+            guard response.expectedContentLength <= Self.maximumResponseBytes else {
+                throw MeetingAIError.responseTooLarge
+            }
+            return try await withTaskCancellationHandler {
+                var data = Data()
+                data.reserveCapacity(min(Self.maximumResponseBytes, max(0, Int(response.expectedContentLength))))
+                for try await byte in bytes {
+                    guard data.count < Self.maximumResponseBytes else { throw MeetingAIError.responseTooLarge }
+                    data.append(byte)
+                    if data.count.isMultiple(of: 16_384) { try Task.checkCancellation() }
+                }
+                try Task.checkCancellation()
+                return data
+            } onCancel: {
+                bytes.task.cancel()
+            }
+        }
+        catch let error as MeetingAIError { throw error }
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled { throw CancellationError() }
         catch {
             try Task.checkCancellation()
             throw MeetingAIError.networkFailure
         }
-        try Task.checkCancellation()
-        guard let http = response as? HTTPURLResponse else { throw MeetingAIError.invalidResponse }
-        switch http.statusCode {
-        case 200..<300: break
-        case 401: throw MeetingAIError.authenticationFailed
-        case 403: throw MeetingAIError.permissionDenied
-        case 429: throw MeetingAIError.rateLimited
-        case 500..<600: throw MeetingAIError.serviceUnavailable
-        default: throw MeetingAIError.httpStatus(http.statusCode)
-        }
-        guard data.count <= Self.maximumResponseBytes else { throw MeetingAIError.responseTooLarge }
-        return data
     }
 
     private func completion(text: String, extraction: Bool, configuration: AIServiceConfiguration, apiKey: String) async throws -> String {
