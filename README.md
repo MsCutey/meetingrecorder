@@ -1,4 +1,19 @@
-# MeetingRecorder V1.1.3
+# MeetingRecorder
+
+现包含 Windows 版（V1.1.3）与新增的原生 macOS 测试版（1.2.0 beta）。
+
+## macOS 版
+
+适用于 macOS 15 及以上，使用 SwiftUI、ScreenCaptureKit 和 AVFoundation，无需安装 .NET 或虚拟声卡。支持屏幕/窗口 MP4、仅声音 M4A、系统声音与麦克风混音、暂停续录、菜单栏控制和临时文件恢复。
+
+安装、权限、构建和功能差异见 [macOS 使用与开发说明](macos/README.md)。预编译包见 [Releases](https://github.com/MsCutey/meetingrecorder/releases)。
+
+```bash
+bash scripts/build-macos.sh
+open artifacts/macos-release-arm64/MeetingRecorder.app
+```
+
+## Windows V1.1.3
 
 MeetingRecorder 是面向 Windows 10/11 x64 的本地会议录屏软件。它不接入会议平台接口，也不会上传录制内容。
 
