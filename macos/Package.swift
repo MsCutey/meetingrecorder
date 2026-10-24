@@ -8,7 +8,8 @@ let package = Package(
     targets: [
         .target(name: "RecorderSupport"),
         .executableTarget(name: "MeetingRecorder", dependencies: ["RecorderSupport"]),
-        .testTarget(name: "RecorderSupportTests", dependencies: ["RecorderSupport"])
+        .testTarget(name: "RecorderSupportTests", dependencies: ["RecorderSupport"]),
+        .testTarget(name: "MeetingRecorderTests", dependencies: ["MeetingRecorder", "RecorderSupport"])
     ],
     swiftLanguageModes: [.v5]
 )

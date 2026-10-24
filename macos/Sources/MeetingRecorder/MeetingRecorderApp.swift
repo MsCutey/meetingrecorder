@@ -3,13 +3,15 @@ import SwiftUI
 
 @main struct MeetingRecorderApp: App {
     @StateObject private var model = RecorderModel()
+    @StateObject private var notes = MeetingNotesModel()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup("MeetingRecorder · 会议录屏", id: "main") {
-            ContentView(model: model)
+            ContentView(model: model, notes: notes)
                 .task {
                     delegate.model = model
+                    delegate.notes = notes
                     if CommandLine.arguments.contains("--smoke-test") {
                         await SmokeTest.run(model)
                     } else if CGPreflightScreenCaptureAccess() {
@@ -57,8 +59,23 @@ import SwiftUI
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: RecorderModel?
+    weak var notes: MeetingNotesModel?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if notes?.hasPendingWork == true {
+            let alert = NSAlert()
+            alert.messageText = "会后纪要或 ChatGPT 登录正在处理"
+            alert.informativeText = "请先取消处理或等待完成，再退出。已完成的转写分段会保留。"
+            alert.runModal()
+            return .terminateCancel
+        }
+        if let notes, !notes.preserveEditsBeforeLeaving() {
+            let alert = NSAlert()
+            alert.messageText = "纪要修改尚未保存"
+            alert.informativeText = "请保存修改或导出后再退出。"
+            alert.runModal()
+            return .terminateCancel
+        }
         guard let model, model.isBusy else { return .terminateNow }
         if !model.canPause {
             let alert = NSAlert()
@@ -77,13 +94,14 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: RecorderModel
+    @ObservedObject var notes: MeetingNotesModel
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("MeetingRecorder").font(.title2.bold())
-                    Text("本地会议录制 · macOS").font(.subheadline).foregroundStyle(.secondary)
+                    Text("本地会议录制 · macOS · AI 纪要预览").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Circle().fill(model.state == .recording ? .red : model.state == .paused ? .orange : .gray)
@@ -94,13 +112,13 @@ struct ContentView: View {
             HSplitView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        GroupBox("录制模式") {
+                        RecorderSection("录制模式") {
                             Picker("模式", selection: $model.settings.audioOnly) {
                                 Text("视频 + 声音 · MP4").tag(false)
                                 Text("仅声音 · M4A").tag(true)
                             }.pickerStyle(.segmented).labelsHidden().padding(10)
                         }
-                        GroupBox("画面来源") {
+                        RecorderSection("画面来源") {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Button(model.loading ? "正在读取…" : "授权并刷新来源", systemImage: "arrow.clockwise") {
@@ -122,7 +140,7 @@ struct ContentView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(10)
                         }
-                        GroupBox("声音来源") {
+                        RecorderSection("声音来源") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Toggle("系统声音", isOn: $model.settings.systemAudio)
                                 Toggle("麦克风", isOn: $model.settings.microphone)
@@ -137,7 +155,7 @@ struct ContentView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(10)
                         }
-                        GroupBox("保存与控制") {
+                        RecorderSection("保存与控制") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(model.settings.outputDirectory).font(.caption).textSelection(.enabled)
                                 HStack {
@@ -164,6 +182,8 @@ struct ContentView: View {
                     HStack {
                         Text("录制历史").font(.headline)
                         Spacer()
+                        Button("会后纪要", systemImage: "text.bubble") { notes.show() }
+                            .disabled(notes.isPresentingFilePanel)
                         Button("打开目录", systemImage: "folder") { NSWorkspace.shared.open(model.outputDirectory) }
                     }
                     if !model.recoveries.isEmpty {
@@ -184,7 +204,8 @@ struct ContentView: View {
                                 HStack {
                                     Button("播放") { NSWorkspace.shared.open(url) }
                                     Button("定位") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy)
+                                    Button("纪要") { notes.show(url) }.disabled(notes.hasPendingWork)
+                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy || notes.hasPendingWork)
                                 }.buttonStyle(.borderless).font(.caption)
                             }.padding(.vertical, 6)
                         }.listStyle(.inset)
@@ -209,5 +230,30 @@ struct ContentView: View {
                 }
             }.padding(18)
         }.frame(minWidth: 850, minHeight: 650)
+            .sheet(isPresented: $notes.isPresented) { MeetingNotesView(model: notes) }
+    }
+}
+
+/// A title and ordinary container keep every control visible to accessibility.
+/// Native GroupBox inside ScrollView triggers a UIElementTreeTransformation
+/// Array.remove(at:) crash in Computer Use 26.1015 on macOS 27.
+private struct RecorderSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+            content.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 1).allowsHitTesting(false))
     }
 }

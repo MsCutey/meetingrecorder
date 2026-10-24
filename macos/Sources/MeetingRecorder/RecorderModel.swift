@@ -109,7 +109,7 @@ enum RecorderState: String {
         if !preapproved && !UserDefaults.standard.bool(forKey: "acceptedRecordingNotice") {
             let alert = NSAlert()
             alert.messageText = "录制前请取得必要授权"
-            alert.informativeText = "请告知参会者并取得所有必要授权。录制文件仅保存在本机。macOS 会显示录制指示，并可能定期请求重新授权。"
+            alert.informativeText = "请告知参会者并取得所有必要授权。录制文件默认仅保存在本机；主动使用会后纪要时，会在确认后发送音轨及转写文字至你配置的 AI 服务。macOS 会显示录制指示，并可能定期请求重新授权。"
             alert.addButton(withTitle: "我已了解并同意"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             UserDefaults.standard.set(true, forKey: "acceptedRecordingNotice")
