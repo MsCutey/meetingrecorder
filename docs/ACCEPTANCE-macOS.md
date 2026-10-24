@@ -35,3 +35,12 @@
 3. 外接麦克风，检查单麦克风、双路声音以及开始静音、录制中静音和恢复。
 4. 验证菜单栏控制、关闭后重开窗口、退出保存、历史播放/定位/删除。
 5. 用至少 30 分钟的录制检查音画同步、内存和磁盘使用；在可丢弃试录中验证异常恢复。
+
+## Build 3：Computer Use 兼容性验证（2026-10-24）
+
+- 将问题收敛为应用特定的辅助功能树触发：同一会话可读取系统计算器及普通 SwiftUI 窗口；`GroupBox`、分段选择器、下拉菜单、可选文字、空状态视图单独使用均通过。`ScrollView` 内的原生 `GroupBox` 组合稳定触发 Computer Use 26.1015 的 `UIElementTreeTransformation.transform` → `Array.remove(at:)` 崩溃。仅把外层 `HSplitView` 换成 `HStack` 无效；替换滚动区内的分组容器后通过。
+- 主窗口的四个分组改为普通标题与容器绘制边框，保留全部可访问控件、绑定、按钮行为及可拖动 `HSplitView`。未修改、替换或重签名官方 Computer Use 组件。
+- 84 项自动测试通过（73 + 11），Apple Silicon Release Build 3 打包与 ad-hoc 签名验证通过，已安装到 `/Applications/MeetingRecorder.app`。
+- 真实 Computer Use 操作已通过：完整主窗口读取、打开会后纪要、经系统文件面板导入隔离合成 WAV、读取已有示例纪要、清空编辑器后继续输入、保存修改。另行读取测试 `.notes.json` 验证 `UI-BUILD3-20261024` 标记确实落盘。
+- 系统 Markdown 保存面板的保存按钮处于不可用状态；取消后 Computer Use 报 `timeoutReached`，未完成导出界面验收。这与前述 `SIGTRAP` 崩溃不同；进程采样显示应用主线程已回到正常事件循环，尚未确定是系统面板还是控制工具的窗口状态问题。
+- 上述素材均为本机生成并复制到独立测试目录，不是真实会议材料，未发起云端转写、套餐授权或付费请求。真实 OAuth、识别效果和录制硬件验收范围仍以各自记录为准。

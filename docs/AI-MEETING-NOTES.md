@@ -179,5 +179,5 @@ bash scripts/build-macos.sh
 - 纪要存储与界面模型测试：验证检查点续传、失败保留、总结不重传音频、只读目录在请求前失败、导出期间源录音变化检测、损坏文件备份重建、Key 草稿按服务隔离、外部文件修改保护、成功导出后可离开及继续编辑时重新保护。
 - ChatGPT 授权使用模拟 OAuth 与本地签名材料：覆盖 PKCE、host ID、回调 state、JWT / OIDC 身份校验、注册信息恢复、刷新轮换及 JWKS 故障恢复；退出和登录终态失效清除 token 并保留非 token 注册信息。
 - ChatGPT 推理使用模拟模型目录和 SSE：覆盖当前账号模型、公开 Responses 请求字段、完整结束事件、UTF-8 / 分片帧、拒绝或截断结果、来源校验、额度和权限错误、取消及有界响应读取，不自动回退到收费 API。
-- 桌面 UI 自动检查仍因 Computer Use 通道返回 `Sky Computer Use native pipe closed before response` 未完成；窗口布局、真实钥匙串交互、系统浏览器授权往返及完整人工操作仍待验收。
+- 2026-10-24 的 Build 3 已针对 `ScrollView + GroupBox` 辅助功能树触发修复应用层兼容性，Computer Use 可以读取主窗口并完成纪要导入、编辑和保存。系统导出面板遇到另一类超时，导出界面、真实钥匙串交互和系统浏览器授权往返仍待验收；详见 [Build 3 验证记录](ACCEPTANCE-macOS.md#build-3computer-use-兼容性验证2026-10-24)。
 - 未执行真实用户 OAuth 授权或云端模型调用，未使用用户真实会议材料；中文识别质量、实际限流/费用和 ChatGPT 套餐消耗均不在已通过范围内。

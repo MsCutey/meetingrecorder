@@ -112,13 +112,13 @@ struct ContentView: View {
             HSplitView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        GroupBox("录制模式") {
+                        RecorderSection("录制模式") {
                             Picker("模式", selection: $model.settings.audioOnly) {
                                 Text("视频 + 声音 · MP4").tag(false)
                                 Text("仅声音 · M4A").tag(true)
                             }.pickerStyle(.segmented).labelsHidden().padding(10)
                         }
-                        GroupBox("画面来源") {
+                        RecorderSection("画面来源") {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Button(model.loading ? "正在读取…" : "授权并刷新来源", systemImage: "arrow.clockwise") {
@@ -140,7 +140,7 @@ struct ContentView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(10)
                         }
-                        GroupBox("声音来源") {
+                        RecorderSection("声音来源") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Toggle("系统声音", isOn: $model.settings.systemAudio)
                                 Toggle("麦克风", isOn: $model.settings.microphone)
@@ -155,7 +155,7 @@ struct ContentView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(10)
                         }
-                        GroupBox("保存与控制") {
+                        RecorderSection("保存与控制") {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(model.settings.outputDirectory).font(.caption).textSelection(.enabled)
                                 HStack {
@@ -230,5 +230,29 @@ struct ContentView: View {
             }.padding(18)
         }.frame(minWidth: 850, minHeight: 650)
             .sheet(isPresented: $notes.isPresented) { MeetingNotesView(model: notes) }
+    }
+}
+
+/// A title and ordinary container keep every control visible to accessibility.
+/// Native GroupBox inside ScrollView triggers a UIElementTreeTransformation
+/// Array.remove(at:) crash in Computer Use 26.1015 on macOS 27.
+private struct RecorderSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+            content.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 1).allowsHitTesting(false))
     }
 }
