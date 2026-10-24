@@ -78,7 +78,9 @@ enum MeetingAPIKeys {
     @Published var isPresented = false
     @Published var showsSettings = false
     @Published var selectedTab = 0
+    @Published private(set) var isPresentingFilePanel = false
     @Published private var exportedDraft: String?
+    private var filePanel: NSSavePanel?
     private var task: Task<Void, Never>?
     private let defaults: UserDefaults
     private let readKey: (String, AIServiceConfiguration) throws -> String
@@ -92,7 +94,7 @@ enum MeetingAPIKeys {
 
     var hasUnsavedEdits: Bool { summaryDraft != (document?.summary ?? "") }
     var hasUnprotectedEdits: Bool { hasUnsavedEdits && exportedDraft != summaryDraft }
-    var hasPendingWork: Bool { isBusy || chatGPT.isWorking }
+    var hasPendingWork: Bool { isBusy || chatGPT.isWorking || isPresentingFilePanel }
 
     init(defaults: UserDefaults = .standard,
          readKey: @escaping (String, AIServiceConfiguration) throws -> String = MeetingAPIKeys.read,
@@ -105,6 +107,7 @@ enum MeetingAPIKeys {
     }
 
     func show(_ source: URL? = nil) {
+        guard !isPresentingFilePanel else { return }
         if !isBusy, let source {
             guard preserveEditsBeforeLeaving() else { return }
             self.source = source
@@ -117,13 +120,15 @@ enum MeetingAPIKeys {
         }
     }
 
-    func importRecording() {
-        guard !isBusy else { return }
+    func importRecording(presentingIn window: NSWindow? = nil) {
+        guard !hasPendingWork else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.mpeg4Audio, .mpeg4Movie, .quickTimeMovie, .mp3, .wav, .aiff]
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.prompt = "选择音视频"
-        if panel.runModal() == .OK, let url = panel.url { show(url) }
+        presentFilePanel(panel, for: window) { [weak self] url in
+            if let url { self?.show(url) }
+        }
     }
 
     func reload() {
@@ -196,7 +201,7 @@ enum MeetingAPIKeys {
     }
 
     func start(transcribeOnly: Bool = false, restart: Bool = false) {
-        guard !isBusy, let source else { return }
+        guard !isBusy, !isPresentingFilePanel, let source else { return }
         if summaryDraft != (document?.summary ?? "") { saveEdits(); if summaryDraft != (document?.summary ?? "") { return } }
         do {
             guard FileManager.default.fileExists(atPath: source.path) else {
@@ -277,7 +282,7 @@ enum MeetingAPIKeys {
     func cancel() { task?.cancel() }
 
     @discardableResult func saveEdits() -> Bool {
-        guard !isBusy else { return false }
+        guard !isBusy, !isPresentingFilePanel else { return false }
         guard hasUnsavedEdits else { return true }
         guard let source, var document else { return false }
         document.summary = summaryDraft; document.updatedAt = Date()
@@ -323,7 +328,7 @@ enum MeetingAPIKeys {
     }
 
     func pasteSummary() {
-        guard !isBusy, document?.transcriptComplete == true,
+        guard !isBusy, !isPresentingFilePanel, document?.transcriptComplete == true,
               let text = NSPasteboard.general.string(forType: .string),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if !summaryDraft.isEmpty {
@@ -337,14 +342,40 @@ enum MeetingAPIKeys {
         message = "已粘贴纪要，请核对后保存修改。"
     }
 
-    func exportMarkdown() {
-        guard var document else { return }
-        document.summary = summaryDraft
+    func exportMarkdown(presentingIn window: NSWindow? = nil) {
+        guard !hasPendingWork, let document else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.nameFieldStringValue = document.sourceName + ".minutes.md"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try writeMarkdown(to: url); message = "已导出：\(url.lastPathComponent)。可关闭窗口；源文件旁的纪要仅在保存修改成功后更新。" }
-        catch { message = "导出失败：\(error.localizedDescription)" }
+        presentFilePanel(panel, for: window) { [weak self] url in
+            guard let self, let url else { return }
+            do {
+                try writeMarkdown(to: url)
+                message = "已导出：\(url.lastPathComponent)。可关闭窗口；源文件旁的纪要仅在保存修改成功后更新。"
+            } catch { message = "导出失败：\(error.localizedDescription)" }
+        }
+    }
+
+    private func presentFilePanel(_ panel: NSSavePanel, for window: NSWindow?, completion: @escaping (URL?) -> Void) {
+        guard !hasPendingWork else { return }
+        var owner = window ?? NSApp.keyWindow ?? NSApp.mainWindow
+        while let sheet = owner?.attachedSheet { owner = sheet }
+        guard let owner else {
+            message = "请先打开会后纪要窗口，再选择文件或导出。"
+            return
+        }
+        // Bind the native panel to this SwiftUI sheet instead of entering a nested
+        // application-modal run loop, which can leave background UI automation stale.
+        filePanel = panel
+        isPresentingFilePanel = true
+        panel.beginSheetModal(for: owner) { [weak self, weak panel, weak owner] response in
+            let url = response == .OK ? panel?.url : nil
+            panel?.orderOut(nil)
+            guard let self else { return }
+            filePanel = nil
+            isPresentingFilePanel = false
+            owner?.makeKeyAndOrderFront(nil)
+            completion(url)
+        }
     }
 }

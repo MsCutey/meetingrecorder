@@ -183,6 +183,7 @@ struct ContentView: View {
                         Text("录制历史").font(.headline)
                         Spacer()
                         Button("会后纪要", systemImage: "text.bubble") { notes.show() }
+                            .disabled(notes.isPresentingFilePanel)
                         Button("打开目录", systemImage: "folder") { NSWorkspace.shared.open(model.outputDirectory) }
                     }
                     if !model.recoveries.isEmpty {
@@ -203,8 +204,8 @@ struct ContentView: View {
                                 HStack {
                                     Button("播放") { NSWorkspace.shared.open(url) }
                                     Button("定位") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                    Button("纪要") { notes.show(url) }.disabled(notes.isBusy)
-                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy || notes.isBusy)
+                                    Button("纪要") { notes.show(url) }.disabled(notes.hasPendingWork)
+                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy || notes.hasPendingWork)
                                 }.buttonStyle(.borderless).font(.caption)
                             }.padding(.vertical, 6)
                         }.listStyle(.inset)

@@ -1,8 +1,10 @@
+import AppKit
 import SwiftUI
 import RecorderSupport
 
 struct MeetingNotesView: View {
     @ObservedObject var model: MeetingNotesModel
+    @StateObject private var windowReference = NotesWindowReference()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -13,7 +15,9 @@ struct MeetingNotesView: View {
                         .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Button("选择文件", systemImage: "doc.badge.plus") { model.importRecording() }.disabled(model.isBusy)
+                Button("选择文件", systemImage: "doc.badge.plus") {
+                    model.importRecording(presentingIn: windowReference.window)
+                }.disabled(model.hasPendingWork)
                 Button("关闭") { model.close() }.disabled(model.hasPendingWork)
             }
             DisclosureGroup("AI 服务设置", isExpanded: $model.showsSettings) {
@@ -74,7 +78,7 @@ struct MeetingNotesView: View {
                     }
                 }.padding(.top, 8)
               }.frame(height: 270)
-            }.disabled(model.isBusy)
+            }.disabled(model.isBusy || model.isPresentingFilePanel)
             Divider()
             HStack {
                 Picker("内容", selection: $model.selectedTab) {
@@ -85,9 +89,9 @@ struct MeetingNotesView: View {
                 Button("复制给 ChatGPT") { model.copyForChatGPT() }
                     .disabled(model.document?.transcriptComplete != true || model.isBusy)
                 Button("粘贴纪要") { model.pasteSummary() }
-                    .disabled(model.document?.transcriptComplete != true || model.isBusy)
-                Button("导出 Markdown") { model.exportMarkdown() }
-                    .disabled(model.document == nil || model.isBusy)
+                    .disabled(model.document?.transcriptComplete != true || model.hasPendingWork)
+                Button("导出 Markdown") { model.exportMarkdown(presentingIn: windowReference.window) }
+                    .disabled(model.document == nil || model.hasPendingWork)
             }
             if model.selectedTab == 0 {
                 if model.document?.transcriptComplete != true && model.summaryDraft.isEmpty {
@@ -96,7 +100,7 @@ struct MeetingNotesView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     TextEditor(text: $model.summaryDraft).font(.body)
-                        .disabled(model.isBusy).border(.quaternary)
+                        .disabled(model.isBusy || model.isPresentingFilePanel).border(.quaternary)
                         .overlay(alignment: .topLeading) {
                             if model.summaryDraft.isEmpty {
                                 Text("点击“生成纪要”，或在这里输入、粘贴纪要草稿。")
@@ -108,7 +112,7 @@ struct MeetingNotesView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button("保存修改") { model.saveEdits() }
-                            .disabled(model.isBusy || model.summaryDraft == model.document?.summary)
+                            .disabled(model.isBusy || model.isPresentingFilePanel || model.summaryDraft == model.document?.summary)
                     }
                 }
             } else {
@@ -130,15 +134,44 @@ struct MeetingNotesView: View {
                     if model.source != nil {
                         Menu("更多") {
                             Button("重新转写（备份旧纪要）") { model.start(transcribeOnly: true, restart: true) }
-                        }.fixedSize()
+                        }.fixedSize().disabled(model.hasPendingWork)
                     }
                     Button(model.document?.transcriptComplete == true ? "转写已完成" : "仅转写 / 继续") { model.start(transcribeOnly: true) }
-                        .disabled(model.source == nil || model.document?.transcriptComplete == true)
+                        .disabled(model.hasPendingWork || model.source == nil || model.document?.transcriptComplete == true)
                     Button(model.document?.summary.isEmpty == false ? "重新生成纪要" : "生成纪要") { model.start() }
-                        .buttonStyle(.borderedProminent).disabled(model.source == nil)
+                        .buttonStyle(.borderedProminent).disabled(model.hasPendingWork || model.source == nil)
                 }
             }
         }.padding(22).frame(minWidth: 850, idealWidth: 950, minHeight: 680, idealHeight: 780)
+            .background(NotesWindowReader(reference: windowReference).frame(width: 0, height: 0))
             .interactiveDismissDisabled(model.hasPendingWork || model.hasUnprotectedEdits)
+    }
+}
+
+private final class NotesWindowReference: ObservableObject {
+    weak var window: NSWindow?
+}
+
+private struct NotesWindowReader: NSViewRepresentable {
+    let reference: NotesWindowReference
+
+    func makeNSView(context: Context) -> WindowReaderView {
+        let view = WindowReaderView()
+        view.reference = reference
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowReaderView, context: Context) {
+        nsView.reference = reference
+        reference.window = nsView.window
+    }
+
+    final class WindowReaderView: NSView {
+        var reference: NotesWindowReference?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reference?.window = window
+        }
     }
 }
