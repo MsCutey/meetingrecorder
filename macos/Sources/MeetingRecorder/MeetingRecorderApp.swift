@@ -77,6 +77,14 @@ import SwiftUI
             return .terminateCancel
         }
         guard let model, model.isBusy else { return .terminateNow }
+        if model.state == .preparing {
+            model.cancelPreparation()
+            Task { @MainActor in
+                while model.state == .preparing { try? await Task.sleep(for: .milliseconds(100)) }
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
         if !model.canPause {
             let alert = NSAlert()
             alert.messageText = "请等待准备或保存完成后再退出。"
@@ -128,9 +136,13 @@ struct ContentView: View {
                                 }
                                 if !model.targets.isEmpty {
                                     Picker("来源", selection: $model.sourceID) {
-                                        ForEach(model.targets) { Text($0.title).tag($0.id) }
+                                        ForEach(model.targets.filter { $0.display != nil }) { Text($0.title).tag($0.id) }
+                                        Text(model.selectedWindowTitle).tag("system:window")
                                     }.disabled(model.settings.audioOnly)
                                 }
+                                Button("选择窗口并开始录制", systemImage: "macwindow") {
+                                    Task { await model.chooseWindow() }
+                                }.disabled(model.settings.audioOnly || model.loading)
                                 Picker("画质", selection: $model.settings.maxHeight) {
                                     Text("1080p").tag(1080); Text("720p").tag(720); Text("源分辨率").tag(16384)
                                 }.disabled(model.settings.audioOnly)
@@ -138,6 +150,10 @@ struct ContentView: View {
                                     .disabled(model.settings.audioOnly)
                                 Text(model.settings.audioOnly ? "仅声音模式不读取或保存视频帧，系统声音仍需屏幕与系统音频权限。" : "30 fps · H.264。窗口录制的系统声音限于所属应用。")
                                     .font(.caption).foregroundStyle(.secondary)
+                                if !model.settings.audioOnly {
+                                    Text("后台窗口录制请先关闭台前调度；窗口被收进左侧或最小化时，系统可能暂停画面。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }.padding(10)
                         }
                         RecorderSection("声音来源") {
@@ -176,6 +192,17 @@ struct ContentView: View {
                               systemImage: model.settings.audioOnly ? "waveform" : "display")
                             .font(.headline)
                         Text(model.elapsedText).font(.system(size: 42, weight: .medium, design: .monospaced))
+                        if !model.captureDimensionsText.isEmpty {
+                            Text("输出画面：\(model.captureDimensionsText)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if model.videoUnavailable && model.isBusy {
+                            Label("窗口画面已停止更新", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.orange)
+                            Text(model.state == .preparing
+                                ? "目标窗口可能被台前调度收起或最小化，尚未开始录制。请恢复窗口或取消准备。"
+                                : "目标窗口可能被台前调度收起或最小化。恢复窗口后画面会继续；启用的声音轨仍会录制。")
+                                .font(.caption)
+                        }
                         Text(String(format: "可用磁盘空间 %.1f GB", model.freeGB)).font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
@@ -217,6 +244,10 @@ struct ContentView: View {
             HStack(alignment: .center, spacing: 12) {
                 Text(model.message).font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                if !model.isBusy && !model.message.isEmpty {
+                    Button("关闭提示", systemImage: "xmark") { model.dismissMessage() }
+                        .labelStyle(.iconOnly).help("关闭提示")
+                }
                 if model.canPause {
                     if model.settings.microphone {
                         Button(model.microphoneMuted ? "开启麦克风" : "静音麦克风") { model.toggleMicrophone() }
@@ -225,6 +256,9 @@ struct ContentView: View {
                     Button("停止并保存", role: .destructive) { Task { await model.stop() } }.buttonStyle(.borderedProminent)
                 } else {
                     if model.isBusy { ProgressView().controlSize(.small) }
+                    if model.state == .preparing {
+                        Button(model.isChoosingWindow ? "取消选择" : "取消准备") { model.cancelPreparation() }
+                    }
                     Button("开始录制", systemImage: "record.circle") { Task { await model.start() } }
                         .buttonStyle(.borderedProminent).disabled(model.isBusy || model.loading)
                 }
