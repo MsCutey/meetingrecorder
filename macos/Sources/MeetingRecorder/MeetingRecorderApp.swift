@@ -246,11 +246,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    if !model.dismissedRecoveries.isEmpty {
-                        Button("显示已关闭的恢复提示（\(model.dismissedRecoveries.count)）") {
-                            model.showDismissedRecoveries()
-                        }.font(.caption).buttonStyle(.link).disabled(model.isBusy)
-                    }
                     if model.history.isEmpty {
                         ContentUnavailableView("暂无录制", systemImage: "record.circle", description: Text("完成录制后会在这里显示本地文件。"))
                     } else {

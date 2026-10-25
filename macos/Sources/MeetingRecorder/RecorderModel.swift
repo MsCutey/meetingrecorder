@@ -56,7 +56,6 @@ enum RecorderState: String {
     @Published var message = "首次使用请点击“授权并刷新来源”。"
     @Published var history: [URL] = []
     @Published var recoveries: [URL] = []
-    @Published private(set) var dismissedRecoveries: [URL] = []
     @Published var elapsed = 0.0
     @Published var microphoneMuted = false
     @Published var loading = false
@@ -378,11 +377,9 @@ enum RecorderState: String {
         let candidates = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
         let dismissed = dismissedRecoveryNotices
-        dismissedRecoveries = candidates.filter {
-            dismissed[$0.standardizedFileURL.path] == recoveryNoticeSignature(for: $0)
+        recoveries = candidates.filter {
+            dismissed[$0.standardizedFileURL.path] != recoveryNoticeSignature(for: $0)
         }
-        let hidden = Set(dismissedRecoveries.map(\.path))
-        recoveries = candidates.filter { !hidden.contains($0.path) }
         updateDiskSpace()
     }
 
@@ -407,13 +404,6 @@ enum RecorderState: String {
         scanFiles()
     }
 
-    func showDismissedRecoveries() {
-        guard !isBusy else { return }
-        var dismissed = dismissedRecoveryNotices
-        for url in dismissedRecoveries { dismissed.removeValue(forKey: url.standardizedFileURL.path) }
-        UserDefaults.standard.set(dismissed, forKey: "dismissedRecoveryNotices.v1")
-        scanFiles()
-    }
     private func updateDiskSpace() {
         let path = FileManager.default.fileExists(atPath: outputDirectory.path) ? outputDirectory.path : NSHomeDirectory()
         let attributes = try? FileManager.default.attributesOfFileSystem(forPath: path)
