@@ -76,7 +76,11 @@ import SwiftUI
             alert.runModal()
             return .terminateCancel
         }
-        guard let model, model.isBusy else { return .terminateNow }
+        guard let model else { return .terminateNow }
+        if !model.isBusy {
+            model.restoreStageManagerIfNeeded()
+            return .terminateNow
+        }
         if model.state == .preparing {
             model.cancelPreparation()
             Task { @MainActor in
@@ -151,7 +155,10 @@ struct ContentView: View {
                                 Text(model.settings.audioOnly ? "仅声音模式不读取或保存视频帧，系统声音仍需屏幕与系统音频权限。" : "30 fps · H.264。窗口录制的系统声音限于所属应用。")
                                     .font(.caption).foregroundStyle(.secondary)
                                 if !model.settings.audioOnly {
-                                    Text("后台窗口录制请先关闭台前调度；窗口被收进左侧或最小化时，系统可能暂停画面。")
+                                    Toggle("录屏时自动关闭台前调度，结束后恢复", isOn: $model.automaticallyManageStageManager)
+                                    Text(model.automaticallyManageStageManager
+                                        ? "保留原来的开关状态。取消或失败也会恢复；强制退出后，下次打开软件恢复。"
+                                        : "后台窗口录制请手动关闭台前调度；窗口被收进左侧或最小化时，系统可能暂停画面。")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }.padding(10)
@@ -195,6 +202,9 @@ struct ContentView: View {
                         if !model.captureDimensionsText.isEmpty {
                             Text("输出画面：\(model.captureDimensionsText)").font(.caption).foregroundStyle(.secondary)
                         }
+                        if model.stageManagerTemporarilyDisabled {
+                            Text("台前调度已临时关闭，录制结束后恢复。").font(.caption).foregroundStyle(.secondary)
+                        }
                         if model.videoUnavailable && model.isBusy {
                             Label("窗口画面已停止更新", systemImage: "exclamationmark.triangle")
                                 .foregroundStyle(.orange)
@@ -206,6 +216,12 @@ struct ContentView: View {
                         Text(String(format: "可用磁盘空间 %.1f GB", model.freeGB)).font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                    if !model.stageManagerRecoveryMessage.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(model.stageManagerRecoveryMessage).font(.caption).foregroundStyle(.orange)
+                            Button("重试恢复台前调度") { model.restoreStageManagerIfNeeded() }.disabled(model.isBusy)
+                        }
+                    }
                     HStack {
                         Text("录制历史").font(.headline)
                         Spacer()

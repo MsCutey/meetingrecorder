@@ -47,6 +47,11 @@ enum RecorderState: String {
     @Published var isChoosingWindow = false
     @Published var captureDimensionsText = ""
     @Published var videoUnavailable = false
+    @Published var automaticallyManageStageManager: Bool {
+        didSet { UserDefaults.standard.set(automaticallyManageStageManager, forKey: "automaticallyManageStageManager.v1") }
+    }
+    @Published private(set) var stageManagerTemporarilyDisabled = false
+    @Published private(set) var stageManagerRecoveryMessage = ""
     @Published var microphones: [AVCaptureDevice] = []
     @Published var message = "首次使用请点击“授权并刷新来源”。"
     @Published var history: [URL] = []
@@ -69,6 +74,7 @@ enum RecorderState: String {
     private var preparationCancelled = false
     private var preparationFailure: String?
     private var recordingID = UUID()
+    private let stageManagerSession: StageManagerSession
     var isBusy: Bool { state != .idle }
     var canPause: Bool { state == .recording || state == .paused }
     var elapsedText: String {
@@ -78,9 +84,15 @@ enum RecorderState: String {
     var outputDirectory: URL { URL(fileURLWithPath: settings.outputDirectory, isDirectory: true) }
 
     init() {
+        automaticallyManageStageManager = UserDefaults.standard.object(forKey: "automaticallyManageStageManager.v1") as? Bool ?? true
+        let recoveryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MeetingRecorder/stage-manager-recovery.json")
+        stageManagerSession = StageManagerSession(readEnabled: StageManagerSystemPreferences.readEnabled,
+            writeEnabled: StageManagerSystemPreferences.writeEnabled, recoveryURL: recoveryURL)
         settings = UserDefaults.standard.data(forKey: "macSettings.v1")
             .flatMap { try? JSONDecoder().decode(Settings.self, from: $0) } ?? Settings()
         scanFiles()
+        restoreStageManagerIfNeeded()
     }
 
     func refresh() async {
@@ -152,6 +164,18 @@ enum RecorderState: String {
 
     func dismissMessage() { message = "" }
 
+    /// Also runs once on process launch, recovering an interrupted prior recording.
+    /// Restoration errors are separate from media-save errors and remain retryable.
+    func restoreStageManagerIfNeeded() {
+        do {
+            _ = try stageManagerSession.restore()
+            stageManagerTemporarilyDisabled = false
+            stageManagerRecoveryMessage = ""
+        } catch {
+            stageManagerRecoveryMessage = "台前调度尚未恢复：\(error.localizedDescription) 可重试；下次打开软件也会再次恢复。"
+        }
+    }
+
     func start(preapproved: Bool = false) async {
         guard state == .idle, !loading else { return }
         if !preapproved && !UserDefaults.standard.bool(forKey: "acceptedRecordingNotice") {
@@ -185,6 +209,17 @@ enum RecorderState: String {
             updateDiskSpace()
             guard freeGB > 0.5 else { throw RecorderError("可用空间不足 512 MB，请更换保存目录。") }
             try checkPreparation()
+            if !settings.audioOnly && automaticallyManageStageManager {
+                stageManagerTemporarilyDisabled = try stageManagerSession.begin()
+                stageManagerRecoveryMessage = ""
+                if stageManagerTemporarilyDisabled {
+                    message = "已临时关闭台前调度，正在准备窗口…"
+                    // Let WindowManager finish restoring normal window geometry
+                    // before presenting the picker or resolving the capture size.
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+                try checkPreparation()
+            }
             if requestedSourceID == "system:window", selectedWindowFilter == nil, !settings.audioOnly {
                 isChoosingWindow = true
                 defer { isChoosingWindow = false }
@@ -285,6 +320,7 @@ enum RecorderState: String {
             }
         } catch {
             if engineStarted { _ = try? await self.engine?.stop() }
+            restoreStageManagerIfNeeded()
             self.engine = nil; pendingOutput = nil; state = .idle; videoUnavailable = false
             selectedWindowFilter = nil; windowPicker.endSelection()
             message = error is CancellationError ? "已取消录制准备。" : "无法开始录制：\(error.localizedDescription)"
@@ -304,6 +340,7 @@ enum RecorderState: String {
         guard canPause, let engine, let output = pendingOutput else { return }
         state = .finishing; timer?.invalidate(); timer = nil
         defer {
+            restoreStageManagerIfNeeded()
             if let wakeLock { ProcessInfo.processInfo.endActivity(wakeLock) }
             wakeLock = nil; self.engine = nil; state = .idle; scanFiles()
             videoUnavailable = false; pendingOutput = nil
@@ -311,6 +348,8 @@ enum RecorderState: String {
         }
         do {
             let partial = try await engine.stop()
+            // The capture is over; restore the desktop before potentially lengthy export.
+            restoreStageManagerIfNeeded()
             capturedAudioPeak = engine.capturedAudioPeak
             lastOutput = try await RecordingExporter.export(partial: partial, destination: output, audioOnly: pendingAudioOnly)
             message = "已保存：\(output.lastPathComponent)"
