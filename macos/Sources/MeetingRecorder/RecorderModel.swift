@@ -56,6 +56,7 @@ enum RecorderState: String {
     @Published var message = "首次使用请点击“授权并刷新来源”。"
     @Published var history: [URL] = []
     @Published var recoveries: [URL] = []
+    @Published private(set) var dismissedRecoveries: [URL] = []
     @Published var elapsed = 0.0
     @Published var microphoneMuted = false
     @Published var loading = false
@@ -374,8 +375,44 @@ enum RecorderState: String {
             includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles])) ?? []
         history = files.filter { ["mp4", "m4a"].contains($0.pathExtension) && !$0.lastPathComponent.contains(".staging.") }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        recoveries = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }
+        let candidates = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        let dismissed = dismissedRecoveryNotices
+        dismissedRecoveries = candidates.filter {
+            dismissed[$0.standardizedFileURL.path] == recoveryNoticeSignature(for: $0)
+        }
+        let hidden = Set(dismissedRecoveries.map(\.path))
+        recoveries = candidates.filter { !hidden.contains($0.path) }
         updateDiskSpace()
+    }
+
+    private var dismissedRecoveryNotices: [String: String] {
+        UserDefaults.standard.dictionary(forKey: "dismissedRecoveryNotices.v1") as? [String: String] ?? [:]
+    }
+
+    private func recoveryNoticeSignature(for url: URL) -> String {
+        // A changed or replaced recording at the same path should be offered again.
+        let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attributes[.size] as? NSNumber)?.stringValue ?? "unknown"
+        let inode = (attributes[.systemFileNumber] as? NSNumber)?.stringValue ?? "unknown"
+        let modified = (attributes[.modificationDate] as? Date).map { String($0.timeIntervalSince1970) } ?? "unknown"
+        return "\(size)|\(inode)|\(modified)"
+    }
+
+    func dismissRecovery(_ url: URL) {
+        guard !isBusy, recoveries.contains(url) else { return }
+        var dismissed = dismissedRecoveryNotices
+        dismissed[url.standardizedFileURL.path] = recoveryNoticeSignature(for: url)
+        UserDefaults.standard.set(dismissed, forKey: "dismissedRecoveryNotices.v1")
+        scanFiles()
+    }
+
+    func showDismissedRecoveries() {
+        guard !isBusy else { return }
+        var dismissed = dismissedRecoveryNotices
+        for url in dismissedRecoveries { dismissed.removeValue(forKey: url.standardizedFileURL.path) }
+        UserDefaults.standard.set(dismissed, forKey: "dismissedRecoveryNotices.v1")
+        scanFiles()
     }
     private func updateDiskSpace() {
         let path = FileManager.default.fileExists(atPath: outputDirectory.path) ? outputDirectory.path : NSHomeDirectory()

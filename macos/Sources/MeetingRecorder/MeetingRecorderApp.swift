@@ -232,11 +232,24 @@ struct ContentView: View {
                     if !model.recoveries.isEmpty {
                         ForEach(model.recoveries, id: \.path) { url in
                             HStack {
-                                Text("发现未完成录制").font(.caption).foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("发现未完成录制").font(.caption).foregroundStyle(.orange)
+                                    Text(url.lastPathComponent).font(.caption2).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle).help(url.lastPathComponent)
+                                }
                                 Spacer()
                                 Button("尝试恢复") { Task { await model.recover(url) } }.disabled(model.isBusy)
+                                Button("关闭恢复提示", systemImage: "xmark") { model.dismissRecovery(url) }
+                                    .labelStyle(.iconOnly).disabled(model.isBusy)
+                                    .help("关闭这条提示，临时录制文件仍保留")
+                                    .accessibilityLabel("关闭恢复提示：\(url.lastPathComponent)")
                             }
                         }
+                    }
+                    if !model.dismissedRecoveries.isEmpty {
+                        Button("显示已关闭的恢复提示（\(model.dismissedRecoveries.count)）") {
+                            model.showDismissedRecoveries()
+                        }.font(.caption).buttonStyle(.link).disabled(model.isBusy)
                     }
                     if model.history.isEmpty {
                         ContentUnavailableView("暂无录制", systemImage: "record.circle", description: Text("完成录制后会在这里显示本地文件。"))
