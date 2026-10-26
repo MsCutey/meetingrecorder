@@ -6,7 +6,7 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-!define VERSION "1.2.0-beta"
+!define VERSION "1.2.0-beta.2"
 !endif
 !ifndef NUMERIC_VERSION
 !define NUMERIC_VERSION "1.2.0.0"

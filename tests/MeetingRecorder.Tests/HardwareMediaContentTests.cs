@@ -90,10 +90,9 @@ public sealed class HardwareMediaContentTests(ITestOutputHelper output)
         try
         {
             await using var service = CreateService(root);
-            // Opt-in selects a controlled test window, never an arbitrary personal window.
-            var title = Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_WINDOW");
-            Assert.False(string.IsNullOrWhiteSpace(title), "请设置 MEETINGRECORDER_TEST_WINDOW 为测试窗口标题。");
-            var target = (await service.GetCaptureTargetsAsync()).First(item => item.Kind == CaptureTargetKind.Window && item.DisplayName.Contains(title!, StringComparison.Ordinal));
+            // Own the fixture rather than depending on a user's window staying visible.
+            using var window = await HardwareWindowGeometryTests.GeometryWindow.OpenAsync();
+            var target = window.Target;
             var microphone = (await service.GetAudioDevicesAsync(AudioSourceKind.Microphone)).First(device => device.IsDefault);
             var frames = 0;
             var previewEnabled = Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_NO_PREVIEW") != "1";

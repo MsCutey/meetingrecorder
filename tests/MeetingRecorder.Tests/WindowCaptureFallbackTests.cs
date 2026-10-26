@@ -47,13 +47,15 @@ public sealed class WindowCaptureFallbackTests
     }
 
     [Fact]
-    public void WindowCoveringMostOfMonitor_FallsBackToFullDisplay()
+    public void WindowCoveringMostOfMonitor_StillExcludesTaskbar()
     {
         var crop = WindowCaptureFallback.ComputeDisplayCrop(
             windowLeft: 0, windowTop: 0, windowRight: 1920, windowBottom: 1040,
             monitorLeft: 0, monitorTop: 0, monitorRight: 1920, monitorBottom: 1080);
 
-        Assert.Null(crop);
+        Assert.NotNull(crop);
+        Assert.Equal(1920, crop.Width);
+        Assert.Equal(1040, crop.Height);
     }
 
     [Fact]

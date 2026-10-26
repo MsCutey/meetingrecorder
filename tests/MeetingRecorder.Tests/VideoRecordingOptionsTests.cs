@@ -52,7 +52,9 @@ public sealed class VideoRecordingOptionsTests
         var full = VideoRecordingEngine.CreateOutputOptions(request, sourceSize: display).OutputFrameSize;
         Assert.Equal(1920, full.Width);
         Assert.Equal(1080, full.Height);
-        var cropped = VideoRecordingEngine.CreateOutputOptions(request, new ScreenRecorderLib.ScreenRect(0, 0, 640, 480), display).OutputFrameSize;
+        using var source = new ScreenRecorderLib.DisplayRecordingSource("test");
+        var size = VideoRecordingEngine.ConfigureSourceCrop(source, new ScreenRecorderLib.ScreenRect(0, 0, 640, 480), display);
+        var cropped = VideoRecordingEngine.CreateOutputOptions(request, size).OutputFrameSize;
         Assert.Equal(640, cropped.Width);
         Assert.Equal(480, cropped.Height);
     }
@@ -98,18 +100,19 @@ public sealed class VideoRecordingOptionsTests
     }
 
     [Fact]
-    public void WindowFallbackCrop_IsForwardedToOutputSourceRect()
+    public void WindowFallbackCrop_AppliesBeforeCompositionWithoutSecondOutputCrop()
     {
         var request = Request(captureSystemAudio: true, captureMicrophone: false);
         var crop = new ScreenRecorderLib.ScreenRect(10, 20, 640, 480);
 
-        var output = VideoRecordingEngine.CreateOutputOptions(request, crop);
+        using var source = new ScreenRecorderLib.DisplayRecordingSource("test");
+        var size = VideoRecordingEngine.ConfigureSourceCrop(source, crop, new ScreenRecorderLib.ScreenSize(1920, 1080));
+        var output = VideoRecordingEngine.CreateOutputOptions(request, size);
 
-        Assert.NotNull(output.SourceRect);
-        Assert.Equal(10, output.SourceRect!.Left);
-        Assert.Equal(20, output.SourceRect.Top);
-        Assert.Equal(640, output.SourceRect.Width);
-        Assert.Equal(480, output.SourceRect.Height);
+        Assert.Same(crop, source.SourceRect);
+        Assert.Null(output.SourceRect);
+        Assert.Equal(640, output.OutputFrameSize.Width);
+        Assert.Equal(480, output.OutputFrameSize.Height);
     }
 
     [Fact]
