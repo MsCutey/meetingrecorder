@@ -13,9 +13,18 @@ bash scripts/build-macos.sh
 open artifacts/macos-release-arm64/MeetingRecorder.app
 ```
 
-## Windows 1.2.0 beta
+## Windows 1.2.0 beta（测试版）
 
 MeetingRecorder 是面向 Windows 10/11 x64 的本地会议录屏软件。它不接入会议平台接口，也不会上传录制内容。
+
+当前 Windows 版本为 **1.2.0 beta 测试版（Pre-release）**，发布标签为 `v1.2.0-windows-beta.1`，尚非稳定版。本次已完成 Windows 11 实机验收；Windows 10、长时间录制等验证范围见 [验收记录](docs/ACCEPTANCE-Windows-1.2.0.md)。
+
+### Windows 下载
+
+- [安装包（推荐，Windows x64）](https://github.com/MsCutey/meetingrecorder/releases/download/v1.2.0-windows-beta.1/MeetingRecorder-1.2.0-beta-Setup-win-x64.exe)
+- [便携版 ZIP（Windows x64）](https://github.com/MsCutey/meetingrecorder/releases/download/v1.2.0-windows-beta.1/MeetingRecorder-1.2.0-beta-portable-win-x64.zip)
+- [SHA-256 校验文件](https://github.com/MsCutey/meetingrecorder/releases/download/v1.2.0-windows-beta.1/SHA256SUMS.txt)
+- [发布页面与更新说明](https://github.com/MsCutey/meetingrecorder/releases/tag/v1.2.0-windows-beta.1)
 
 ## 功能
 
