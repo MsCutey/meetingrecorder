@@ -35,7 +35,23 @@ enum RecorderState: String {
     }
     @Published var state = RecorderState.idle
     @Published var targets: [CaptureTarget] = []
-    @Published var sourceID = ""
+    @Published var sourceID = "" {
+        didSet {
+            if sourceID != "system:window" {
+                selectedWindowFilter = nil
+                windowPicker.endSelection()
+            }
+        }
+    }
+    @Published var selectedWindowTitle = "窗口（点击“选择窗口”）"
+    @Published var isChoosingWindow = false
+    @Published var captureDimensionsText = ""
+    @Published var videoUnavailable = false
+    @Published var automaticallyManageStageManager: Bool {
+        didSet { UserDefaults.standard.set(automaticallyManageStageManager, forKey: "automaticallyManageStageManager.v1") }
+    }
+    @Published private(set) var stageManagerTemporarilyDisabled = false
+    @Published private(set) var stageManagerRecoveryMessage = ""
     @Published var microphones: [AVCaptureDevice] = []
     @Published var message = "首次使用请点击“授权并刷新来源”。"
     @Published var history: [URL] = []
@@ -53,6 +69,12 @@ enum RecorderState: String {
     private var pendingOutput: URL?
     private var pendingAudioOnly = false
     private var wakeLock: NSObjectProtocol?
+    private let windowPicker = WindowCapturePicker()
+    private var selectedWindowFilter: SCContentFilter?
+    private var preparationCancelled = false
+    private var preparationFailure: String?
+    private var recordingID = UUID()
+    private let stageManagerSession: StageManagerSession
     var isBusy: Bool { state != .idle }
     var canPause: Bool { state == .recording || state == .paused }
     var elapsedText: String {
@@ -62,9 +84,15 @@ enum RecorderState: String {
     var outputDirectory: URL { URL(fileURLWithPath: settings.outputDirectory, isDirectory: true) }
 
     init() {
+        automaticallyManageStageManager = UserDefaults.standard.object(forKey: "automaticallyManageStageManager.v1") as? Bool ?? true
+        let recoveryURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MeetingRecorder/stage-manager-recovery.json")
+        stageManagerSession = StageManagerSession(readEnabled: StageManagerSystemPreferences.readEnabled,
+            writeEnabled: StageManagerSystemPreferences.writeEnabled, recoveryURL: recoveryURL)
         settings = UserDefaults.standard.data(forKey: "macSettings.v1")
             .flatMap { try? JSONDecoder().decode(Settings.self, from: $0) } ?? Settings()
         scanFiles()
+        restoreStageManagerIfNeeded()
     }
 
     func refresh() async {
@@ -85,7 +113,9 @@ enum RecorderState: String {
             }.sorted { ($0.owningApplication?.applicationName ?? "") < ($1.owningApplication?.applicationName ?? "") }
             .map { CaptureTarget(id: "window:\($0.windowID)",
                 title: "\($0.owningApplication?.applicationName ?? "窗口") · \($0.title ?? "未命名")", display: nil, window: $0) }
-            if !targets.contains(where: { $0.id == sourceID }) { sourceID = targets.first?.id ?? "" }
+            if sourceID != "system:window", !targets.contains(where: { $0.id == sourceID }) {
+                sourceID = targets.first?.id ?? ""
+            }
             microphones = AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external],
                 mediaType: .audio, position: .unspecified).devices
             if !settings.microphoneID.isEmpty && !microphones.contains(where: { $0.uniqueID == settings.microphoneID }) {
@@ -104,71 +134,175 @@ enum RecorderState: String {
         if panel.runModal() == .OK, let url = panel.url { settings.outputDirectory = url.path; scanFiles() }
     }
 
+    func chooseWindow() async {
+        guard !isBusy, !loading else { return }
+        sourceID = "system:window"
+        await start()
+    }
+
+    private func acceptWindowSelection(_ filter: SCContentFilter) {
+        selectedWindowFilter = filter
+        if #available(macOS 15.2, *), let window = filter.includedWindows.first {
+            selectedWindowTitle = "窗口 · \(window.title ?? window.owningApplication?.applicationName ?? "已选择")"
+        } else { selectedWindowTitle = "系统选择的窗口" }
+        sourceID = "system:window"
+    }
+
+    func cancelPreparation() {
+        guard state == .preparing else { return }
+        preparationCancelled = true
+        windowPicker.cancel()
+        engine?.cancelStart()
+        message = "正在取消准备…"
+    }
+
+    private func checkPreparation() throws {
+        try Task.checkCancellation()
+        if let preparationFailure { throw RecorderError(preparationFailure) }
+        if preparationCancelled { throw CancellationError() }
+    }
+
+    func dismissMessage() { message = "" }
+
+    /// Also runs once on process launch, recovering an interrupted prior recording.
+    /// Restoration errors are separate from media-save errors and remain retryable.
+    func restoreStageManagerIfNeeded() {
+        do {
+            _ = try stageManagerSession.restore()
+            stageManagerTemporarilyDisabled = false
+            stageManagerRecoveryMessage = ""
+        } catch {
+            stageManagerRecoveryMessage = "台前调度尚未恢复：\(error.localizedDescription) 可重试；下次打开软件也会再次恢复。"
+        }
+    }
+
     func start(preapproved: Bool = false) async {
         guard state == .idle, !loading else { return }
         if !preapproved && !UserDefaults.standard.bool(forKey: "acceptedRecordingNotice") {
             let alert = NSAlert()
             alert.messageText = "录制前请取得必要授权"
-            alert.informativeText = "请告知参会者并取得所有必要授权。录制文件仅保存在本机。macOS 会显示录制指示，并可能定期请求重新授权。"
+            alert.informativeText = "请告知参会者并取得所有必要授权。录制文件默认仅保存在本机；主动使用会后纪要时，会在确认后发送音轨及转写文字至你配置的 AI 服务。macOS 会显示录制指示，并可能定期请求重新授权。"
             alert.addButton(withTitle: "我已了解并同意"); alert.addButton(withTitle: "取消")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             UserDefaults.standard.set(true, forKey: "acceptedRecordingNotice")
-        }
-        lastOutput = nil
-        if content == nil { await refresh() }
-        guard let content, let display = content.displays.first else {
-            if self.content != nil { message = "尚无可用的显示器，请连接显示器后刷新来源。" }
-            return
         }
         if settings.audioOnly && !settings.systemAudio && !settings.microphone {
             message = "仅声音模式至少需要启用一个声音来源。"; return
         }
         state = .preparing
+        preparationCancelled = false
+        preparationFailure = nil
+        lastOutput = nil; videoUnavailable = false; captureDimensionsText = ""
+        let attemptID = UUID()
+        recordingID = attemptID
+        let requestedSourceID = sourceID
+        var engineStarted = false
         defer { countdownRemaining = 0 }
         do {
             if settings.microphone {
                 guard AVCaptureDevice.default(for: .audio) != nil else { throw RecorderError("未发现麦克风，请连接设备或关闭麦克风选项。") }
                 let granted = await AVCaptureDevice.requestAccess(for: .audio)
+                try checkPreparation()
                 guard granted else { throw RecorderError("麦克风未获授权，请在系统设置 → 隐私与安全性 → 麦克风中允许访问。") }
             }
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             updateDiskSpace()
             guard freeGB > 0.5 else { throw RecorderError("可用空间不足 512 MB，请更换保存目录。") }
-            let target = targets.first { $0.id == sourceID }
-            if !settings.audioOnly && target == nil { throw RecorderError("请选择画面来源。") }
-            let filter: SCContentFilter
-            var width = display.width, height = display.height
-            if let window = target?.window, !settings.audioOnly {
-                filter = SCContentFilter(desktopIndependentWindow: window)
-                width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
-                height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
-            } else {
-                let selectedDisplay = settings.audioOnly ? display : (target?.display ?? display)
-                let excluded = settings.excludeApp ? content.applications.filter {
-                    $0.processID == ProcessInfo.processInfo.processIdentifier
-                } : []
-                filter = SCContentFilter(display: selectedDisplay, excludingApplications: excluded, exceptingWindows: [])
-                width = selectedDisplay.width; height = selectedDisplay.height
+            try checkPreparation()
+            if !settings.audioOnly && automaticallyManageStageManager {
+                stageManagerTemporarilyDisabled = try stageManagerSession.begin()
+                stageManagerRecoveryMessage = ""
+                if stageManagerTemporarilyDisabled {
+                    message = "已临时关闭台前调度，正在准备窗口…"
+                    // Let WindowManager finish restoring normal window geometry
+                    // before presenting the picker or resolving the capture size.
+                    try await Task.sleep(for: .milliseconds(500))
+                }
+                try checkPreparation()
+            }
+            if requestedSourceID == "system:window", selectedWindowFilter == nil, !settings.audioOnly {
+                isChoosingWindow = true
+                defer { isChoosingWindow = false }
+                message = "请重新选择录制窗口，以获取当前完整尺寸。"
+                acceptWindowSelection(try await windowPicker.selectWindow())
             }
             for remaining in stride(from: settings.countdown, through: 1, by: -1) {
+                try checkPreparation()
                 countdownRemaining = remaining
                 try await Task.sleep(for: .seconds(1))
             }
+            try checkPreparation()
+            let filter: SCContentFilter
+            let width: Int, height: Int
+            if requestedSourceID == "system:window", let selectedWindowFilter, !settings.audioOnly {
+                // A system-picker grant is sufficient for this window. Do not request
+                // an unrelated full-desktop permission by enumerating shareable content.
+                filter = selectedWindowFilter
+                width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
+                height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+            } else {
+                // Resolve IDs after the countdown; cached SCWindow geometry can
+                // describe a thumbnail even after the real window has been restored.
+                let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+                try checkPreparation()
+                self.content = content
+                guard let display = content.displays.first else { throw RecorderError("尚无可用的显示器。") }
+                if requestedSourceID.hasPrefix("window:"), !settings.audioOnly {
+                    guard let window = content.windows.first(where: { "window:\($0.windowID)" == requestedSourceID }) else {
+                        throw RecorderError("所选窗口已经关闭，请重新选择窗口。")
+                    }
+                    filter = SCContentFilter(desktopIndependentWindow: window)
+                    width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
+                    height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+                } else {
+                    let selectedDisplay: SCDisplay
+                    if settings.audioOnly { selectedDisplay = display }
+                    else {
+                        guard let current = content.displays.first(where: { "display:\($0.displayID)" == requestedSourceID }) else {
+                            throw RecorderError("请选择当前可用的显示器或窗口。")
+                        }
+                        selectedDisplay = current
+                    }
+                    let excluded = settings.excludeApp ? content.applications.filter {
+                        $0.processID == ProcessInfo.processInfo.processIdentifier
+                    } : []
+                    filter = SCContentFilter(display: selectedDisplay, excludingApplications: excluded, exceptingWindows: [])
+                    width = selectedDisplay.width; height = selectedDisplay.height
+                }
+            }
+            try checkPreparation()
+            let dimensions = RecordingFiles.dimensions(width: width, height: height, maxHeight: settings.maxHeight)
+            captureDimensionsText = settings.audioOnly ? "" : "\(dimensions.0) × \(dimensions.1)"
             let output = RecordingFiles.uniqueURL(in: outputDirectory, extension: settings.audioOnly ? "m4a" : "mp4")
             let engine = CaptureEngine()
             engine.onFailure = { [weak self] error in
                 Task { @MainActor in
-                    guard let self, self.canPause else { return }
+                    guard let self, self.recordingID == attemptID else { return }
+                    if self.state == .preparing {
+                        self.preparationFailure = error
+                        self.engine?.cancelStart()
+                        return
+                    }
+                    guard self.canPause else { return }
                     self.message = "录制中断：\(error)。正在尝试保存。"
                     await self.stop()
                 }
             }
+            engine.onVideoAvailability = { [weak self] available in
+                Task { @MainActor in
+                    guard let self, self.recordingID == attemptID, self.isBusy else { return }
+                    self.videoUnavailable = !available
+                }
+            }
             self.engine = engine
             pendingOutput = output; pendingAudioOnly = settings.audioOnly
+            message = settings.audioOnly ? "正在等待声音…" : "正在等待首帧画面…"
             try await engine.start(CaptureOptions(audioOnly: settings.audioOnly, systemAudio: settings.systemAudio,
                 microphone: settings.microphone, microphoneID: settings.microphoneID.isEmpty ? nil : settings.microphoneID,
                 startMuted: settings.startMuted, maxHeight: settings.maxHeight, excludeApp: settings.excludeApp,
                 filter: filter, width: width, height: height, output: output))
+            engineStarted = true
+            try checkPreparation()
             elapsed = 0; microphoneMuted = settings.startMuted; state = .recording
             message = freeGB < 5 ? "可用磁盘空间低于 5 GB，请留意剩余容量。" : "录制已开始。暂停时间不会写入成品。"
             wakeLock = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled],
@@ -185,9 +319,11 @@ enum RecorderState: String {
                 }
             }
         } catch {
-            // startCapture can fail after allocating the writer; start() cancels it.
-            self.engine = nil; state = .idle
-            message = "无法开始录制：\(error.localizedDescription)"
+            if engineStarted { _ = try? await self.engine?.stop() }
+            restoreStageManagerIfNeeded()
+            self.engine = nil; pendingOutput = nil; state = .idle; videoUnavailable = false
+            selectedWindowFilter = nil; windowPicker.endSelection()
+            message = error is CancellationError ? "已取消录制准备。" : "无法开始录制：\(error.localizedDescription)"
             scanFiles()
         }
     }
@@ -204,11 +340,16 @@ enum RecorderState: String {
         guard canPause, let engine, let output = pendingOutput else { return }
         state = .finishing; timer?.invalidate(); timer = nil
         defer {
+            restoreStageManagerIfNeeded()
             if let wakeLock { ProcessInfo.processInfo.endActivity(wakeLock) }
             wakeLock = nil; self.engine = nil; state = .idle; scanFiles()
+            videoUnavailable = false; pendingOutput = nil
+            selectedWindowFilter = nil; windowPicker.endSelection()
         }
         do {
             let partial = try await engine.stop()
+            // The capture is over; restore the desktop before potentially lengthy export.
+            restoreStageManagerIfNeeded()
             capturedAudioPeak = engine.capturedAudioPeak
             lastOutput = try await RecordingExporter.export(partial: partial, destination: output, audioOnly: pendingAudioOnly)
             message = "已保存：\(output.lastPathComponent)"
@@ -233,9 +374,36 @@ enum RecorderState: String {
             includingPropertiesForKeys: [.creationDateKey], options: [.skipsHiddenFiles])) ?? []
         history = files.filter { ["mp4", "m4a"].contains($0.pathExtension) && !$0.lastPathComponent.contains(".staging.") }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        recoveries = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }
+        let candidates = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        let dismissed = dismissedRecoveryNotices
+        recoveries = candidates.filter {
+            dismissed[$0.standardizedFileURL.path] != recoveryNoticeSignature(for: $0)
+        }
         updateDiskSpace()
     }
+
+    private var dismissedRecoveryNotices: [String: String] {
+        UserDefaults.standard.dictionary(forKey: "dismissedRecoveryNotices.v1") as? [String: String] ?? [:]
+    }
+
+    private func recoveryNoticeSignature(for url: URL) -> String {
+        // A changed or replaced recording at the same path should be offered again.
+        let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+        let size = (attributes[.size] as? NSNumber)?.stringValue ?? "unknown"
+        let inode = (attributes[.systemFileNumber] as? NSNumber)?.stringValue ?? "unknown"
+        let modified = (attributes[.modificationDate] as? Date).map { String($0.timeIntervalSince1970) } ?? "unknown"
+        return "\(size)|\(inode)|\(modified)"
+    }
+
+    func dismissRecovery(_ url: URL) {
+        guard !isBusy, recoveries.contains(url) else { return }
+        var dismissed = dismissedRecoveryNotices
+        dismissed[url.standardizedFileURL.path] = recoveryNoticeSignature(for: url)
+        UserDefaults.standard.set(dismissed, forKey: "dismissedRecoveryNotices.v1")
+        scanFiles()
+    }
+
     private func updateDiskSpace() {
         let path = FileManager.default.fileExists(atPath: outputDirectory.path) ? outputDirectory.path : NSHomeDirectory()
         let attributes = try? FileManager.default.attributesOfFileSystem(forPath: path)
