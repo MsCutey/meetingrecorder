@@ -13,7 +13,7 @@
       "meetingrecorder.engine": {
         "type": "Project",
         "dependencies": {
-          "MeetingRecorder.Core": "[1.2.0-beta, )",
+          "MeetingRecorder.Core": "[1.2.0-beta.2, )",
           "NAudio.Wasapi": "[2.2.1, )",
           "ScreenRecorderLib": "[6.6.0, )"
         }

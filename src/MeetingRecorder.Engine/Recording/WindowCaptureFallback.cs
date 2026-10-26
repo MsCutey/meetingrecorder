@@ -5,12 +5,11 @@ namespace MeetingRecorder.Engine.Recording;
 /// </summary>
 internal static class WindowCaptureFallback
 {
-    private const double FullDisplayCoverageThreshold = 0.85;
     private const int MinimumCroppedSize = 64;
 
     /// <summary>
     /// 计算窗口矩形与显示器矩形的交集，并换算为显示器左上角相对的裁剪区域（偶数化）。
-    /// 交集过小或已覆盖显示器大部分面积时返回 null，表示应直接录制整个显示器。
+    /// 交集过小时返回 null，表示只能尝试整个显示器；大窗口仍保留准确裁剪。
     /// </summary>
     public static ScreenCrop? ComputeDisplayCrop(
         int windowLeft, int windowTop, int windowRight, int windowBottom,
@@ -26,7 +25,6 @@ internal static class WindowCaptureFallback
         var monitorHeight = monitorBottom - monitorTop;
         if (monitorWidth <= 0 || monitorHeight <= 0) return null;
         if (width < MinimumCroppedSize || height < MinimumCroppedSize) return null;
-        if ((double)width * height >= (double)monitorWidth * monitorHeight * FullDisplayCoverageThreshold) return null;
 
         var cropLeft = FloorToEven(left - monitorLeft);
         var cropTop = FloorToEven(top - monitorTop);

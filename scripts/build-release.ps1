@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
-    [string] $Version = "1.2.0-beta",
+    [string] $Version = "1.2.0-beta.2",
     [string] $DotNet = "dotnet",
     [string] $MakeNsis = "makensis",
     [switch] $SkipInstaller

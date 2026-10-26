@@ -20,7 +20,6 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private readonly AudioEndpointPeakReader? _microphonePeak;
     private Recorder? _recorder;
     private RecordingSourceBase? _source;
-    private ScreenRect? _sourceCrop;
     private ScreenSize? _sourceSize;
     private TaskCompletionSource _started = NewSignal();
     private TaskCompletionSource _completed = NewSignal();
@@ -81,7 +80,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         {
             var handle = new nint(target.NativeHandle);
             if (!IsWindow(handle)) throw new WindowCaptureUnavailableException("所选窗口已关闭，无法开始窗口录制。请刷新画面来源后重试。");
-            if (IsIconic(handle)) throw new WindowCaptureUnavailableException("所选窗口已最小化，请先恢复窗口再开始录制。");
+            await RestoreCaptureWindowAsync(handle, cancellationToken).ConfigureAwait(false);
 
             try
             {
@@ -99,7 +98,9 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
                 try
                 {
                     await StartRecorderAsync(fallback.Value.Source, fallback.Value.Crop, requireFrames: false, cancellationToken, fallback.Value.Size).ConfigureAwait(false);
-                    _fallbackWarning = "窗口捕获不可用，已自动改为录制该窗口所在显示器区域；画面中可能包含同屏的其他内容。";
+                    _fallbackWarning = fallback.Value.Crop is null
+                        ? "窗口捕获不可用，已自动改为录制整个显示器。"
+                        : "窗口捕获不可用，已改为录制窗口当前所在区域；请保持窗口位置和大小不变，并避免其他窗口遮挡。";
                     return;
                 }
                 catch (Exception error) when (error is not OperationCanceledException)
@@ -138,10 +139,9 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     {
         DisposeFailedRecorder();
         _source = source;
-        _sourceCrop = crop;
-        _sourceSize = sourceSize;
+        _sourceSize = ConfigureSourceCrop(source, crop, sourceSize);
         if (sourceSize is null && _request.CaptureTarget is { Kind: CaptureTargetKind.Window } target &&
-            GetWindowRect(new nint(target.NativeHandle), out var rect))
+            TryGetVisibleWindowRect(new nint(target.NativeHandle), out var rect))
         {
             _sourceSize = new ScreenSize(rect.Right - rect.Left, rect.Bottom - rect.Top);
         }
@@ -210,7 +210,6 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
         _source?.Dispose();
         _source = null;
-        _sourceCrop = null;
     }
 
     private void DeletePartialOutput()
@@ -313,7 +312,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private RecorderOptions CreateRecorderOptions(RecordingSourceBase source) => new()
     {
         SourceOptions = new SourceOptions { RecordingSources = [source] },
-        OutputOptions = CreateOutputOptions(_request with { EnablePreview = _request.EnablePreview || _probeWindowFrames }, _sourceCrop, _sourceSize),
+        OutputOptions = CreateOutputOptions(_request with { EnablePreview = _request.EnablePreview || _probeWindowFrames }, _sourceSize),
         VideoEncoderOptions = CreateVideoEncoderOptions(_request),
         AudioOptions = CreateAudioOptions(_request),
         LogOptions = new LogOptions
@@ -324,13 +323,21 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
     };
 
-    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request, ScreenRect? sourceCrop = null, ScreenSize? sourceSize = null) => new()
+    internal static ScreenSize? ConfigureSourceCrop(RecordingSourceBase source, ScreenRect? crop, ScreenSize? sourceSize)
+    {
+        // Apply the crop before composition. Hardware regression tests caught 6.6.0
+        // encoding a scaled full desktop when only OutputOptions.SourceRect was set.
+        source.SourceRect = crop;
+        return crop is null ? sourceSize : new ScreenSize(crop.Width, crop.Height);
+    }
+
+    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request, ScreenSize? sourceSize = null) => new()
     {
         RecorderMode = RecorderMode.Video,
-        OutputFrameSize = GetOutputSize(request, sourceCrop, sourceSize),
+        OutputFrameSize = GetOutputSize(request, sourceSize),
         Stretch = StretchMode.Uniform,
         IsVideoCaptureEnabled = true,
-        SourceRect = sourceCrop,
+        SourceRect = null,
         // 只在主程序明确允许时生成缩小预览；源预览始终关闭。
         IsVideoFramePreviewEnabled = request.EnablePreview,
         VideoFramePreviewSize = PreviewSize
@@ -364,7 +371,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     {
         try
         {
-            if (!GetWindowRect(windowHandle, out var windowRect)) return null;
+            if (!TryGetVisibleWindowRect(windowHandle, out var windowRect)) return null;
             var monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
             if (monitor == nint.Zero) return null;
             var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
@@ -436,10 +443,10 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         Channels = AudioChannels.Stereo
     };
 
-    private static ScreenSize GetOutputSize(WorkerRecordingRequest request, ScreenRect? crop, ScreenSize? sourceSize)
+    private static ScreenSize GetOutputSize(WorkerRecordingRequest request, ScreenSize? sourceSize)
     {
-        var width = Math.Max(2, crop?.Width ?? sourceSize?.Width ?? request.CaptureTarget?.Width ?? 1920);
-        var height = Math.Max(2, crop?.Height ?? sourceSize?.Height ?? request.CaptureTarget?.Height ?? 1080);
+        var width = Math.Max(2, sourceSize?.Width ?? request.CaptureTarget?.Width ?? 1920);
+        var height = Math.Max(2, sourceSize?.Height ?? request.CaptureTarget?.Height ?? 1080);
         var maxHeight = request.Quality switch
         {
             VideoQualityPreset.Hd => 720,
@@ -505,6 +512,34 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     }
 
     private static int MakeEven(int value) => value % 2 == 0 ? value : value - 1;
+
+    private static async Task RestoreCaptureWindowAsync(nint handle, CancellationToken cancellationToken)
+    {
+        if (!IsIconic(handle)) return;
+        // Queue the restore on the target's UI thread without taking keyboard focus.
+        ShowWindowAsync(handle, 4); // SW_SHOWNOACTIVATE
+        var started = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(3))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsWindow(handle)) throw new WindowCaptureUnavailableException("所选窗口已关闭，无法开始录制。");
+            if (!IsIconic(handle) && TryGetVisibleWindowRect(handle, out var rect) && rect.Right > rect.Left && rect.Bottom > rect.Top)
+            {
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+        throw new WindowCaptureUnavailableException("无法自动恢复所选窗口，请手动恢复窗口后重试。");
+    }
+
+    private static bool TryGetVisibleWindowRect(nint handle, out Rect rect)
+    {
+        // WGC uses the visible DWM frame, excluding GetWindowRect's invisible resize border.
+        if (DwmGetWindowAttribute(handle, 9, out rect, Marshal.SizeOf<Rect>()) == 0 && rect.Right > rect.Left && rect.Bottom > rect.Top)
+            return true;
+        return GetWindowRect(handle, out rect);
+    }
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public async ValueTask DisposeAsync()
@@ -538,6 +573,13 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsIconic(nint windowHandle);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ShowWindowAsync(nint windowHandle, int command);
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmGetWindowAttribute(nint windowHandle, int attribute, out Rect rect, int size);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
