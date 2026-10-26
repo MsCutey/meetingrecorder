@@ -4,6 +4,7 @@ using MeetingRecorder.Core.Recording;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using Xunit.Abstractions;
+using System.Diagnostics;
 
 namespace MeetingRecorder.Tests;
 
@@ -156,10 +157,29 @@ public sealed class HardwareMediaContentTests(ITestOutputHelper output)
         output.WriteLine($"Video stream: {properties.Width}x{properties.Height}, duration={clip.OriginalDuration.TotalSeconds:F3}s");
         Assert.True(properties.Width >= 2 && properties.Width % 2 == 0);
         Assert.True(properties.Height >= 2 && properties.Height <= 720 && properties.Height % 2 == 0);
+        var ffmpeg = Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_FFMPEG");
+        if (!string.IsNullOrWhiteSpace(ffmpeg))
+        {
+            var start = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var argument in new[] { "-v", "error", "-xerror", "-i", path, "-map", "0:v:0", "-vf", "scale=160:90", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1" })
+                start.ArgumentList.Add(argument);
+            using var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动测试解码器。");
+            var errors = process.StandardError.ReadToEndAsync();
+            using var decoded = new MemoryStream();
+            await process.StandardOutput.BaseStream.CopyToAsync(decoded);
+            await process.WaitForExitAsync();
+            Assert.True(process.ExitCode == 0, await errors);
+            var rgb = decoded.ToArray();
+            Assert.True(rgb.Length >= 160 * 90 * 3, "视频没有可解码帧。");
+            Assert.True(rgb.Max() - rgb.Min() > 10, "解码视频全黑或为纯色。");
+            output.WriteLine($"FFmpeg decoded all frames: {rgb.Length / (160 * 90 * 3)}, RGB range={rgb.Max() - rgb.Min()}");
+            return;
+        }
         var composition = new Windows.Media.Editing.MediaComposition();
         composition.Clips.Add(clip);
         using var thumbnail = await composition.GetThumbnailAsync(clip.OriginalDuration / 2, 160, 90,
-            Windows.Media.Editing.VideoFramePrecision.NearestFrame);
+            Windows.Media.Editing.VideoFramePrecision.NearestKeyFrame);
         var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(thumbnail);
         var data = await decoder.GetPixelDataAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
             Windows.Graphics.Imaging.BitmapAlphaMode.Ignore, new Windows.Graphics.Imaging.BitmapTransform(),
