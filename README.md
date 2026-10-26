@@ -1,6 +1,6 @@
 # MeetingRecorder
 
-现包含 Windows 版（V1.1.3）与新增的原生 macOS 测试版（1.2.0 beta）。
+此分支提供独立的 **MeetingRecorder Pure · macOS 纯净版**，只保留本地录屏、录音与文件管理。Windows 源码仍保留。
 
 ## macOS 版
 
@@ -8,11 +8,11 @@
 
 安装、权限、构建和功能差异见 [macOS 使用与开发说明](macos/README.md)。预编译包见 [Releases](https://github.com/MsCutey/meetingrecorder/releases)。
 
-当前功能分支增加 macOS **会后纪要实验版**：从录制历史或本地音视频生成转写，再整理概要、决策和待办。已实现官方 **Sign in with ChatGPT** 登录与订阅文字总结，也可选择 DeepSeek、OpenAI API 或兼容服务；音频转写仍使用独立 API。新用户默认选择 ChatGPT 订阅总结，已有 API 配置保持原有方式。只有主动确认处理才发送音轨/文本；支持断点继续、纪要编辑、Markdown 导出及手动复制入口。操作方法见 [macOS 说明](macos/README.md#会后纪要实验版当前功能分支)，方案与限制见 [AI 会议纪要调研](docs/AI-MEETING-NOTES.md)。真实账号 OAuth、云端调用及图形界面操作仍待验收；分支尚未合并，不代表已发布版本。
+纯净版不包含纪要、语音转写、AI 总结、账号登录或上传模块。独立应用标识、设置和录制目录允许与[完整版](https://github.com/MsCutey/meetingrecorder/tree/codex/macos-window-capture-fixes)同时安装。保留窗口清晰度修复、台前调度自动恢复、暂停续录和可关闭的恢复提示。
 
 ```bash
 bash scripts/build-macos.sh
-open artifacts/macos-release-arm64/MeetingRecorder.app
+open "artifacts/macos-pure-release-arm64/MeetingRecorder Pure.app"
 ```
 
 ## Windows V1.1.3

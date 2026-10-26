@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "MeetingRecorder",
+    name: "MeetingRecorderPure",
     platforms: [.macOS(.v15)],
-    products: [.executable(name: "MeetingRecorder", targets: ["MeetingRecorder"])],
+    products: [.executable(name: "MeetingRecorderPure", targets: ["MeetingRecorder"])],
     targets: [
         .target(name: "RecorderSupport"),
         .executableTarget(name: "MeetingRecorder", dependencies: ["RecorderSupport"]),

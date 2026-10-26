@@ -3,15 +3,13 @@ import SwiftUI
 
 @main struct MeetingRecorderApp: App {
     @StateObject private var model = RecorderModel()
-    @StateObject private var notes = MeetingNotesModel()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        WindowGroup("MeetingRecorder · 会议录屏", id: "main") {
-            ContentView(model: model, notes: notes)
+        WindowGroup("MeetingRecorder Pure · 本地录制", id: "main") {
+            ContentView(model: model)
                 .task {
                     delegate.model = model
-                    delegate.notes = notes
                     if CommandLine.arguments.contains("--smoke-test") {
                         await SmokeTest.run(model)
                     } else if CGPreflightScreenCaptureAccess() {
@@ -35,7 +33,7 @@ import SwiftUI
             }
         }
         MenuBarExtra {
-            Text("MeetingRecorder · \(model.state.rawValue)")
+            Text("MeetingRecorder Pure · \(model.state.rawValue)")
             if model.isBusy { Text(model.elapsedText) }
             Button("显示主窗口") {
                 NSApp.activate(ignoringOtherApps: true)
@@ -51,7 +49,7 @@ import SwiftUI
             Divider()
             Button("退出") { NSApp.terminate(nil) }
         } label: {
-            Label(model.canPause ? model.elapsedText : "MeetingRecorder",
+            Label(model.canPause ? model.elapsedText : "MeetingRecorder Pure",
                   systemImage: model.state == .recording ? "record.circle.fill" : "record.circle")
         }
     }
@@ -59,23 +57,8 @@ import SwiftUI
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: RecorderModel?
-    weak var notes: MeetingNotesModel?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if notes?.hasPendingWork == true {
-            let alert = NSAlert()
-            alert.messageText = "会后纪要或 ChatGPT 登录正在处理"
-            alert.informativeText = "请先取消处理或等待完成，再退出。已完成的转写分段会保留。"
-            alert.runModal()
-            return .terminateCancel
-        }
-        if let notes, !notes.preserveEditsBeforeLeaving() {
-            let alert = NSAlert()
-            alert.messageText = "纪要修改尚未保存"
-            alert.informativeText = "请保存修改或导出后再退出。"
-            alert.runModal()
-            return .terminateCancel
-        }
         guard let model else { return .terminateNow }
         if !model.isBusy {
             model.restoreStageManagerIfNeeded()
@@ -106,14 +89,13 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: RecorderModel
-    @ObservedObject var notes: MeetingNotesModel
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable().frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("MeetingRecorder").font(.title2.bold())
-                    Text("本地会议录制 · macOS · AI 纪要预览").font(.subheadline).foregroundStyle(.secondary)
+                    Text("MeetingRecorder Pure").font(.title2.bold())
+                    Text("纯净版 · 本地录屏与录音").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Circle().fill(model.state == .recording ? .red : model.state == .paused ? .orange : .gray)
@@ -225,8 +207,6 @@ struct ContentView: View {
                     HStack {
                         Text("录制历史").font(.headline)
                         Spacer()
-                        Button("会后纪要", systemImage: "text.bubble") { notes.show() }
-                            .disabled(notes.isPresentingFilePanel)
                         Button("打开目录", systemImage: "folder") { NSWorkspace.shared.open(model.outputDirectory) }
                     }
                     if !model.recoveries.isEmpty {
@@ -255,8 +235,7 @@ struct ContentView: View {
                                 HStack {
                                     Button("播放") { NSWorkspace.shared.open(url) }
                                     Button("定位") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                    Button("纪要") { notes.show(url) }.disabled(notes.hasPendingWork)
-                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy || notes.hasPendingWork)
+                                    Button("删除", role: .destructive) { model.delete(url) }.disabled(model.isBusy)
                                 }.buttonStyle(.borderless).font(.caption)
                             }.padding(.vertical, 6)
                         }.listStyle(.inset)
@@ -288,7 +267,6 @@ struct ContentView: View {
                 }
             }.padding(18)
         }.frame(minWidth: 850, minHeight: 650)
-            .sheet(isPresented: $notes.isPresented) { MeetingNotesView(model: notes) }
     }
 }
 

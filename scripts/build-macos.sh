@@ -9,20 +9,20 @@ if [[ "$ARCH" != arm64 && "$ARCH" != x86_64 ]]; then
 fi
 export CLANG_MODULE_CACHE_PATH="$ROOT/artifacts/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$ROOT/artifacts/swift-cache"
-BUILD="$ROOT/artifacts/macos-$ARCH"
-OUT="$ROOT/artifacts/macos-release-$ARCH"
-APP="$OUT/MeetingRecorder.app"
+BUILD="$ROOT/artifacts/macos-pure-$ARCH"
+OUT="$ROOT/artifacts/macos-pure-release-$ARCH"
+APP="$OUT/MeetingRecorder Pure.app"
 TEST_FLAGS=()
 # CLT 27 ships Testing.framework but does not discover its macro plugin automatically.
 PLUGIN="$(dirname "$(xcrun --find swiftc)")/../lib/swift/host/plugins/testing/libTestingMacros.dylib"
 if [[ -f "$PLUGIN" ]]; then
     TEST_FLAGS=(-Xswiftc -load-plugin-library -Xswiftc "$PLUGIN")
 fi
-swift test --disable-sandbox --package-path macos --scratch-path artifacts/macos-tests "${TEST_FLAGS[@]}"
+swift test --disable-sandbox --package-path macos --scratch-path artifacts/macos-pure-tests "${TEST_FLAGS[@]}"
 swift build --build-system native --disable-sandbox --package-path macos --scratch-path "$BUILD" -c release --arch "$ARCH"
 BIN="$(swift build --build-system native --disable-sandbox --package-path macos --scratch-path "$BUILD" -c release --arch "$ARCH" --show-bin-path)"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN/MeetingRecorder" "$APP/Contents/MacOS/MeetingRecorder"
+cp "$BIN/MeetingRecorderPure" "$APP/Contents/MacOS/MeetingRecorderPure"
 cp macos/Support/Info.plist "$APP/Contents/Info.plist"
 ICONSET="$BUILD/MeetingRecorder.iconset"
 mkdir -p "$ICONSET"
@@ -35,14 +35,14 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/MeetingRecorder.icns"
 # A Developer ID can be supplied by the maintainer; ad-hoc signing works for local builds.
 IDENTITY="${SIGN_IDENTITY:--}"
 if [[ "$IDENTITY" == - ]]; then
-    codesign --force --sign - --identifier com.mscutey.meetingrecorder "$APP"
+    codesign --force --sign - --identifier com.mscutey.meetingrecorder.pure "$APP"
 else
     codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
 fi
 codesign --verify --strict --verbose=2 "$APP"
 cp macos/README.md "$OUT/README-macOS.md"
 cp THIRD-PARTY-NOTICES.txt "$OUT/THIRD-PARTY-NOTICES.txt"
-ZIP="$ROOT/artifacts/MeetingRecorder-1.2.0-macOS-$ARCH.zip"
+ZIP="$ROOT/artifacts/MeetingRecorder-Pure-1.2.0-macOS-$ARCH.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
-(cd "$ROOT/artifacts" && shasum -a 256 "$(basename "$ZIP")" > "SHA256SUMS-macOS-$ARCH.txt")
+(cd "$ROOT/artifacts" && shasum -a 256 "$(basename "$ZIP")" > "SHA256SUMS-macOS-Pure-$ARCH.txt")
 echo "Built: $ZIP"

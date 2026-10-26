@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>MeetingRecorder</string>
-  <key>CFBundleIdentifier</key><string>com.mscutey.meetingrecorder</string>
-  <key>CFBundleName</key><string>MeetingRecorder</string>
-  <key>CFBundleDisplayName</key><string>MeetingRecorder</string>
+  <key>CFBundleExecutable</key><string>MeetingRecorderPure</string>
+  <key>CFBundleIdentifier</key><string>com.mscutey.meetingrecorder.pure</string>
+  <key>CFBundleName</key><string>MeetingRecorder Pure</string>
+  <key>CFBundleDisplayName</key><string>MeetingRecorder 纯净版</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.2.0</string>
-  <key>CFBundleVersion</key><string>8</string>
+  <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleIconFile</key><string>MeetingRecorder</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSScreenCaptureUsageDescription</key><string>录制你选择的屏幕、窗口或系统声音，默认保存在本机；会后纪要仅在你确认后发送音轨及转写文字至所配置的 AI 服务。</string>
+  <key>NSScreenCaptureUsageDescription</key><string>录制你选择的屏幕、窗口或系统声音，文件仅保存在本机，不会上传。</string>
   <key>NSMicrophoneUsageDescription</key><string>将你选择的麦克风声音加入会议录制，仅在启用麦克风时访问。</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

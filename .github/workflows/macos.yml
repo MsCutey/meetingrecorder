@@ -1,4 +1,4 @@
-name: macOS build
+name: macOS Pure build
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         run: bash scripts/build-macos.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: MeetingRecorder-macOS-${{ matrix.arch }}
+          name: MeetingRecorder-Pure-macOS-${{ matrix.arch }}
           path: |
-            artifacts/MeetingRecorder-1.2.0-macOS-${{ matrix.arch }}.zip
-            artifacts/SHA256SUMS-macOS-${{ matrix.arch }}.txt
+            artifacts/MeetingRecorder-Pure-1.2.0-macOS-${{ matrix.arch }}.zip
+            artifacts/SHA256SUMS-macOS-Pure-${{ matrix.arch }}.txt
