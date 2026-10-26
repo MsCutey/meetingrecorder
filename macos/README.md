@@ -4,7 +4,7 @@
 
 ## 独立安装
 
-- 解压后将 `MeetingRecorder Pure.app` 放入“应用程序”。应用标识为 `com.mscutey.meetingrecorder.pure`，可与完整版同时安装，不覆盖完整版。
+- 打开 DMG，将 `MeetingRecorder Pure.app` 拖入镜像中的 `Applications` 文件夹。安装完成后推出镜像，从“应用程序”启动。应用标识为 `com.mscutey.meetingrecorder.pure`，可与完整版同时安装，不覆盖完整版。
 - 纯净版使用自己的设置，默认录制目录是 `~/Movies/MeetingRecorder Pure`，不迁移或清除完整版的录制、设置、纪要或凭据。
 - 系统屏幕与音频权限按应用分别授予。录窗口可点击“选择窗口并开始录制”，在系统选择器中确认目标；整屏及系统声音按需要完成系统授权。麦克风另行授权。
 - 录制前请取得必要授权。文件保存在本机，软件不提供发送到云端的功能。
@@ -35,7 +35,7 @@ bash scripts/build-macos.sh
 open "artifacts/macos-pure-release-arm64/MeetingRecorder Pure.app"
 ```
 
-产物为 `MeetingRecorder-Pure-1.2.0-macOS-arm64.zip` 与 `SHA256SUMS-macOS-Pure-arm64.txt`。Intel使用 `ARCH=x86_64 bash scripts/build-macos.sh`。GitHub Actions独立命名为 `MeetingRecorder-Pure-macOS-<架构>`。
+默认产物为 `MeetingRecorder-Pure-1.2.0-macOS-arm64.dmg` 与 `SHA256SUMS-macOS-Pure-arm64.txt`。镜像内包含应用、Applications快捷入口和安装说明。Intel使用 `ARCH=x86_64 bash scripts/build-macos.sh`。GitHub Actions独立命名为 `MeetingRecorder-Pure-macOS-<架构>`。
 
 显式开发试录（普通启动不会自动录制）：
 
