@@ -42,7 +42,7 @@ fi
 codesign --verify --strict --verbose=2 "$APP"
 cp macos/README.md "$OUT/README-macOS.md"
 cp THIRD-PARTY-NOTICES.txt "$OUT/THIRD-PARTY-NOTICES.txt"
-ZIP="$ROOT/artifacts/MeetingRecorder-1.2.0-macOS-$ARCH.zip"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
-(cd "$ROOT/artifacts" && shasum -a 256 "$(basename "$ZIP")" > "SHA256SUMS-macOS-$ARCH.txt")
-echo "Built: $ZIP"
+DMG="$ROOT/artifacts/MeetingRecorder-1.2.0-macOS-$ARCH.dmg"
+bash "$ROOT/scripts/package-macos-dmg.sh" "$APP" "$DMG" "MeetingRecorder"
+(cd "$ROOT/artifacts" && shasum -a 256 "$(basename "$DMG")" > "SHA256SUMS-macOS-$ARCH.txt")
+echo "Built: $DMG"

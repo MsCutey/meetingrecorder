@@ -4,7 +4,7 @@
 
 ## 安装与权限
 
-1. 解压 ZIP，将 `MeetingRecorder.app` 拖入“应用程序”。
+1. 打开 DMG，将 `MeetingRecorder.app` 拖入镜像中的 `Applications` 文件夹。安装完成后推出镜像，从“应用程序”启动。
 2. 打开应用，点击“授权并刷新来源”。在“系统设置 → 隐私与安全性 → 屏幕与系统音频录制”中允许 MeetingRecorder。系统要求时退出并重新打开应用。
 3. 启用麦克风时另行授权；Mac mini 没有内置麦克风，请接入外置设备。
 4. 先设置保存目录、声音选项和画质。录窗口时点击“选择窗口并开始录制”，在 macOS 选择器中选择目标；录整屏时选择显示器后点击“开始录制”。录制前请取得必要授权。
@@ -61,7 +61,7 @@ bash scripts/build-macos.sh
 open artifacts/macos-release-arm64/MeetingRecorder.app
 ```
 
-构建脚本先运行单元测试，再生成 `.app`、ZIP 和 SHA-256。`ARCH=x86_64 bash scripts/build-macos.sh` 可交叉构建 Intel 包。可通过 `SIGN_IDENTITY` 指定 Developer ID；脚本不自动公证。
+构建脚本先运行单元测试，再生成 `.app`、DMG 和 SHA-256。DMG内包含应用、Applications快捷入口和安装说明。`ARCH=x86_64 bash scripts/build-macos.sh` 可交叉构建 Intel 包。可通过 `SIGN_IDENTITY` 指定 Developer ID；脚本不自动公证。
 
 ## 开发试录
 
