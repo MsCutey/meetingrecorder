@@ -21,11 +21,15 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private Recorder? _recorder;
     private RecordingSourceBase? _source;
     private ScreenRect? _sourceCrop;
+    private ScreenSize? _sourceSize;
     private TaskCompletionSource _started = NewSignal();
     private TaskCompletionSource _completed = NewSignal();
     private Exception? _failure;
     private string? _fallbackWarning;
     private volatile bool _microphoneMuted;
+    private bool _paused;
+    private bool _probeWindowFrames;
+    private int _windowImageReceived;
     private long _lastPreviewTimestamp;
     private bool _isStarted;
     private bool _stopRequested;
@@ -94,7 +98,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
             {
                 try
                 {
-                    await StartRecorderAsync(fallback.Value.Source, fallback.Value.Crop, requireFrames: false, cancellationToken).ConfigureAwait(false);
+                    await StartRecorderAsync(fallback.Value.Source, fallback.Value.Crop, requireFrames: false, cancellationToken, fallback.Value.Size).ConfigureAwait(false);
                     _fallbackWarning = "窗口捕获不可用，已自动改为录制该窗口所在显示器区域；画面中可能包含同屏的其他内容。";
                     return;
                 }
@@ -105,7 +109,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
 
                 try
                 {
-                    await StartRecorderAsync(fallback.Value.FullDisplaySource, null, requireFrames: false, cancellationToken).ConfigureAwait(false);
+                    await StartRecorderAsync(fallback.Value.FullDisplaySource, null, requireFrames: false, cancellationToken, fallback.Value.Size).ConfigureAwait(false);
                     _fallbackWarning = "窗口与显示器区域捕获均不可用，已自动改为录制整个显示器。";
                     return;
                 }
@@ -130,16 +134,24 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
     }
 
-    private async Task StartRecorderAsync(RecordingSourceBase source, ScreenRect? crop, bool requireFrames, CancellationToken cancellationToken)
+    private async Task StartRecorderAsync(RecordingSourceBase source, ScreenRect? crop, bool requireFrames, CancellationToken cancellationToken, ScreenSize? sourceSize = null)
     {
         DisposeFailedRecorder();
         _source = source;
         _sourceCrop = crop;
+        _sourceSize = sourceSize;
+        if (sourceSize is null && _request.CaptureTarget is { Kind: CaptureTargetKind.Window } target &&
+            GetWindowRect(new nint(target.NativeHandle), out var rect))
+        {
+            _sourceSize = new ScreenSize(rect.Right - rect.Left, rect.Bottom - rect.Top);
+        }
         _started = NewSignal();
         _completed = NewSignal();
         _failure = null;
+        _probeWindowFrames = requireFrames;
+        Interlocked.Exchange(ref _windowImageReceived, 0);
         _recorder = Recorder.CreateRecorder(CreateRecorderOptions(source));
-        if (_request.EnablePreview) _recorder.OnFrameRecorded += OnPreviewFrameRecorded;
+        if (_request.EnablePreview || _probeWindowFrames) _recorder.OnFrameRecorded += OnPreviewFrameRecorded;
         _recorder.OnStatusChanged += OnRecorderStatusChanged;
         _recorder.OnRecordingComplete += OnRecorderComplete;
         _recorder.OnRecordingFailed += OnRecorderFailed;
@@ -148,6 +160,14 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
             _recorder.Record(_request.PartialPath);
             await _started.Task.WaitAsync(TimeSpan.FromSeconds(18), cancellationToken).ConfigureAwait(false);
             await VerifyCaptureHealthAsync(requireFrames, cancellationToken).ConfigureAwait(false);
+            if (_probeWindowFrames && !_request.EnablePreview)
+            {
+                var disabled = _recorder.GetDynamicOptionsBuilder()
+                    .SetDynamicOutputOptions(new DynamicOutputOptions { IsVideoFramePreviewEnabled = false }).Apply();
+                if (!disabled) throw new WindowCaptureUnavailableException("无法关闭窗口启动验证的临时预览。");
+                _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
+            }
+            _probeWindowFrames = false;
         }
         catch
         {
@@ -160,20 +180,20 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private async Task VerifyCaptureHealthAsync(bool requireFrames, CancellationToken cancellationToken)
     {
         var window = requireFrames ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(500);
-        var deadline = Stopwatch.GetTimestamp() + window.Ticks;
+        var start = Stopwatch.GetTimestamp();
         var initialFrame = _recorder!.CurrentFrameNumber;
-        while (Stopwatch.GetTimestamp() < deadline)
+        while (Stopwatch.GetElapsedTime(start) < window)
         {
             var failure = Volatile.Read(ref _failure);
             if (failure is not null) throw failure;
-            if (requireFrames && _recorder.CurrentFrameNumber > initialFrame) return;
+            if (requireFrames && _recorder.CurrentFrameNumber > initialFrame && Volatile.Read(ref _windowImageReceived) != 0) return;
             await Task.Delay(50, cancellationToken).ConfigureAwait(false);
         }
         var lateFailure = Volatile.Read(ref _failure);
         if (lateFailure is not null) throw lateFailure;
         if (requireFrames)
         {
-            throw new WindowCaptureUnavailableException("录制引擎已启动但 2 秒内未产生任何视频帧，判定当前捕获源不可用。");
+            throw new WindowCaptureUnavailableException("录制引擎已启动但 2 秒内未产生有效画面（无帧或全黑），判定当前捕获源不可用。");
         }
     }
 
@@ -181,7 +201,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     {
         if (_recorder is not null)
         {
-            if (_request.EnablePreview) _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
+            _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
             _recorder.OnStatusChanged -= OnRecorderStatusChanged;
             _recorder.OnRecordingComplete -= OnRecorderComplete;
             _recorder.OnRecordingFailed -= OnRecorderFailed;
@@ -216,15 +236,8 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private void ApplyMicrophoneInitialMute()
     {
         if (!_request.CaptureMicrophone || !_request.StartMicrophoneMuted) return;
-        try
-        {
-            SetMicrophoneMutedNative(true);
-            _microphoneMuted = true;
-        }
-        catch
-        {
-            // 初始静音失败不阻断录制；用户仍可手动切换麦克风。
-        }
+        SetMicrophoneMutedNative(true);
+        _microphoneMuted = true;
     }
 
     public Task SetMicrophoneEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
@@ -233,7 +246,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         if (!_isStarted || _isStopped || _recorder is null) throw new InvalidOperationException("录制引擎当前不可操作。");
         if (!_request.CaptureMicrophone) throw new InvalidOperationException("本次录制未启用麦克风。");
         cancellationToken.ThrowIfCancellationRequested();
-        SetMicrophoneMutedNative(!enabled);
+        if (!_paused) SetMicrophoneMutedNative(!enabled);
         _microphoneMuted = !enabled;
         return Task.CompletedTask;
     }
@@ -241,7 +254,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private void SetMicrophoneMutedNative(bool muted)
     {
         var applied = _recorder!.GetDynamicOptionsBuilder()
-            .SetDynamicAudioOptions(new DynamicAudioOptions { IsInputDeviceEnabled = !muted })
+            .SetDynamicAudioOptions(new DynamicAudioOptions { InputVolume = muted ? 0f : 1f })
             .Apply();
         if (!applied) throw new InvalidOperationException("原生录制引擎拒绝了麦克风开关请求，状态保持不变。");
     }
@@ -252,7 +265,10 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         try
         {
             EnsureActive();
+            // Keep capture silent across Resume until the queued microphone choice is applied.
+            if (_request.CaptureMicrophone) SetMicrophoneMutedNative(true);
             _recorder!.Pause();
+            _paused = true;
             _clock.Pause();
         }
         finally { _operationGate.Release(); }
@@ -265,6 +281,9 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         {
             EnsureActive();
             _recorder!.Resume();
+            if (_request.CaptureMicrophone)
+                await NativeMicrophoneControl.ApplyAfterResumeAsync(_recorder, _microphoneMuted, cancellationToken).ConfigureAwait(false);
+            _paused = false;
             _clock.Resume();
         }
         finally { _operationGate.Release(); }
@@ -294,7 +313,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
     private RecorderOptions CreateRecorderOptions(RecordingSourceBase source) => new()
     {
         SourceOptions = new SourceOptions { RecordingSources = [source] },
-        OutputOptions = CreateOutputOptions(_request, _sourceCrop),
+        OutputOptions = CreateOutputOptions(_request with { EnablePreview = _request.EnablePreview || _probeWindowFrames }, _sourceCrop, _sourceSize),
         VideoEncoderOptions = CreateVideoEncoderOptions(_request),
         AudioOptions = CreateAudioOptions(_request),
         LogOptions = new LogOptions
@@ -305,10 +324,10 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
     };
 
-    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request, ScreenRect? sourceCrop = null) => new()
+    internal static OutputOptions CreateOutputOptions(WorkerRecordingRequest request, ScreenRect? sourceCrop = null, ScreenSize? sourceSize = null) => new()
     {
         RecorderMode = RecorderMode.Video,
-        OutputFrameSize = GetOutputSize(request),
+        OutputFrameSize = GetOutputSize(request, sourceCrop, sourceSize),
         Stretch = StretchMode.Uniform,
         IsVideoCaptureEnabled = true,
         SourceRect = sourceCrop,
@@ -341,7 +360,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         };
     }
 
-    private (RecordingSourceBase Source, ScreenRect? Crop, RecordingSourceBase FullDisplaySource)? TryCreateDisplayFallback(nint windowHandle)
+    private (RecordingSourceBase Source, ScreenRect? Crop, RecordingSourceBase FullDisplaySource, ScreenSize Size)? TryCreateDisplayFallback(nint windowHandle)
     {
         try
         {
@@ -369,11 +388,11 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
 
             if (crop is null)
             {
-                return (CreateDisplaySource(), null, CreateDisplaySource());
+                return (CreateDisplaySource(), null, CreateDisplaySource(), new ScreenSize(info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top));
             }
 
             var rect = new ScreenRect(crop.Left, crop.Top, crop.Width, crop.Height);
-            return (CreateDisplaySource(), rect, CreateDisplaySource());
+            return (CreateDisplaySource(), rect, CreateDisplaySource(), new ScreenSize(info.Monitor.Right - info.Monitor.Left, info.Monitor.Bottom - info.Monitor.Top));
         }
         catch
         {
@@ -412,20 +431,24 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         ForceInputDeviceMono = false,
         InputDeviceMasterChannel = 0,
         OutputVolume = request.CaptureSystemAudio && !request.CaptureMicrophone ? 2f : 1f,
-        InputVolume = 1f,
+        InputVolume = request.StartMicrophoneMuted ? 0f : 1f,
         Bitrate = AudioBitrate.bitrate_128kbps,
         Channels = AudioChannels.Stereo
     };
 
-    private static ScreenSize GetOutputSize(WorkerRecordingRequest request) => request.Quality switch
+    private static ScreenSize GetOutputSize(WorkerRecordingRequest request, ScreenRect? crop, ScreenSize? sourceSize)
     {
-        VideoQualityPreset.FullHd => new ScreenSize(1920, 1080),
-        VideoQualityPreset.Hd => new ScreenSize(1280, 720),
-        VideoQualityPreset.Source => new ScreenSize(
-            MakeEven(Math.Max(2, request.CaptureTarget?.Width ?? 1920)),
-            MakeEven(Math.Max(2, request.CaptureTarget?.Height ?? 1080))),
-        _ => new ScreenSize(1920, 1080)
-    };
+        var width = Math.Max(2, crop?.Width ?? sourceSize?.Width ?? request.CaptureTarget?.Width ?? 1920);
+        var height = Math.Max(2, crop?.Height ?? sourceSize?.Height ?? request.CaptureTarget?.Height ?? 1080);
+        var maxHeight = request.Quality switch
+        {
+            VideoQualityPreset.Hd => 720,
+            VideoQualityPreset.Source => height,
+            _ => 1080
+        };
+        var scale = Math.Min(1, maxHeight / (double)height);
+        return new ScreenSize(Math.Max(2, MakeEven((int)(width * scale))), Math.Max(2, MakeEven((int)(height * scale))));
+    }
 
     private void OnRecorderStatusChanged(object? sender, RecordingStatusEventArgs eventArgs)
     {
@@ -453,7 +476,17 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         if (bitmap is null || bitmap.Data == nint.Zero || bitmap.Length <= 0 || bitmap.Width <= 0 || bitmap.Height <= 0) return;
         var bytes = new byte[bitmap.Length];
         Marshal.Copy(bitmap.Data, bytes, 0, bytes.Length);
-        PreviewFrameAvailable?.Invoke(this, new PreviewFrameEventArgs(new PreviewFrame(bitmap.Width, bitmap.Height, bitmap.Stride, bytes)));
+        if (_probeWindowFrames && HasVisiblePixels(bytes)) Interlocked.Exchange(ref _windowImageReceived, 1);
+        if (_request.EnablePreview)
+            PreviewFrameAvailable?.Invoke(this, new PreviewFrameEventArgs(new PreviewFrame(bitmap.Width, bitmap.Height, bitmap.Stride, bytes)));
+    }
+
+    internal static bool HasVisiblePixels(ReadOnlySpan<byte> bgra)
+    {
+        // Ignore alpha: an opaque black frame is not proof of a usable window capture.
+        for (var offset = 0; offset + 3 < bgra.Length; offset += 4)
+            if (bgra[offset] > 3 || bgra[offset + 1] > 3 || bgra[offset + 2] > 3) return true;
+        return false;
     }
 
     private string? GetCaptureTargetWarning()
@@ -485,7 +518,7 @@ public sealed partial class VideoRecordingEngine : IRecordingEngine
         }
         if (_recorder is not null)
         {
-            if (_request.EnablePreview) _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
+            _recorder.OnFrameRecorded -= OnPreviewFrameRecorded;
             _recorder.OnStatusChanged -= OnRecorderStatusChanged;
             _recorder.OnRecordingComplete -= OnRecorderComplete;
             _recorder.OnRecordingFailed -= OnRecorderFailed;

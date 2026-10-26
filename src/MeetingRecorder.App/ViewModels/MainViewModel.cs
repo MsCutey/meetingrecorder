@@ -82,8 +82,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<RecoveryCandidate> RecoveryCandidates { get; } = [];
     public IReadOnlyList<Choice<VideoQualityPreset>> QualityChoices { get; } =
     [
-        new(VideoQualityPreset.FullHd, "1080p · 1920×1080"),
-        new(VideoQualityPreset.Hd, "720p · 1280×720"),
+        new(VideoQualityPreset.FullHd, "最高 1080p · 保持来源比例"),
+        new(VideoQualityPreset.Hd, "最高 720p · 保持来源比例"),
         new(VideoQualityPreset.Source, "源分辨率")
     ];
     public IReadOnlyList<int> CountdownChoices { get; } = [0, 3, 5, 10];

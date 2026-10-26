@@ -5,6 +5,7 @@ using MeetingRecorder.Core.Recording;
 
 namespace MeetingRecorder.Tests;
 
+[Collection("Hardware")]
 public sealed class HardwareStartStopStressTests
 {
     [HardwareStressFact]

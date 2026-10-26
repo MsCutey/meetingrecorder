@@ -65,6 +65,8 @@ internal sealed class WorkerApplication(PipeConnection connection, RollingFileLo
             return WorkerExitCodes.PreflightFailure;
         }
 
+        using var powerRequest = new RecordingPowerRequest();
+        logger.Info("power-request", "已请求阻止自动睡眠，录制结束或 Worker 退出时释放。");
         await using IRecordingEngine engine = request.Mode == RecordingMode.AudioOnly
             ? new ResilientAudioOnlyRecordingEngine(request)
             : new VideoRecordingEngine(request);
