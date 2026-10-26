@@ -27,6 +27,7 @@ public sealed class HardwareRecordingIntegrationTests
                 true));
             await using var service = new WorkerRecordingService(
                 repository,
+                launcher: new WorkerProcessLauncher(Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_WORKER")),
                 presentationCoordinator: new TestRecordingPresentationCoordinator(
                     new RecordingPresentationDecision(false, true)));
             var audioDevices = await service.GetAudioDevicesAsync(AudioSourceKind.SystemAudio);
@@ -118,6 +119,7 @@ public sealed class HardwareRecordingIntegrationTests
                 true));
             await using var service = new WorkerRecordingService(
                 repository,
+                launcher: new WorkerProcessLauncher(Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_WORKER")),
                 presentationCoordinator: new TestRecordingPresentationCoordinator(
                     new RecordingPresentationDecision(false, true)));
             var display = (await service.GetCaptureTargetsAsync()).First(target => target.Kind == CaptureTargetKind.Display);

@@ -14,6 +14,8 @@
 | 混音、预览、防捕获 | 保留 Windows 既有增益、实时预览和默认关闭的实验性防捕获 |
 | 设置迁移 | 保留 schema 4，兼容旧版设置与历史 |
 
+Worker 与主程序均声明 PerMonitorV2，避免 200% 缩放下设备枚举及窗口裁剪使用逻辑像素，造成来源尺寸减半。
+
 电源请求遵循 [Microsoft PowerCreateRequest](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-powercreaterequest) 的句柄生命周期；[系统策略](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-powersetrequest) 仍可能允许主动睡眠及电池供电下 Modern Standby。没有修改系统电源策略。
 
 ## 验证结果
@@ -30,7 +32,7 @@
 - 启动窗口图像检查最多临时使用约 2 秒低分辨率帧；预览关闭时不发送给主界面，验证完成后关闭原生预览回调。
 - 主界面、录制须知、设置窗口、设备列表与画质文案已完成本机界面检查。
 
-测试报告位于本地 `tests/MeetingRecorder.Tests/TestResults/windows-final.trx`；140 次矩阵记录在 `windows-full.trx`。试录媒体由测试自动删除，诊断不进入源码或发布包。
+测试报告位于本地 `tests/MeetingRecorder.Tests/TestResults/windows-final.trx`；140 次矩阵记录在 `windows-full.trx`。最终发布 Worker 的复核记录使用 `windows-release-final.trx`。试录媒体由测试自动删除，诊断不进入源码或发布包。
 
 ## 复现
 

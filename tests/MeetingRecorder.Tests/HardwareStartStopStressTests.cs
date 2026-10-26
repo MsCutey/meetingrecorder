@@ -26,7 +26,8 @@ public sealed class HardwareStartStopStressTests
                 Path.Combine(data, "active-session.json"),
                 Path.Combine(data, "assets"),
                 true));
-            await using var service = new WorkerRecordingService(repository);
+            await using var service = new WorkerRecordingService(repository,
+                launcher: new WorkerProcessLauncher(Environment.GetEnvironmentVariable("MEETINGRECORDER_TEST_WORKER")));
             var display = (await service.GetCaptureTargetsAsync()).First(target => target.Kind == CaptureTargetKind.Display);
             var systemDevices = await service.GetAudioDevicesAsync(AudioSourceKind.SystemAudio);
             var microphoneDevices = await service.GetAudioDevicesAsync(AudioSourceKind.Microphone);

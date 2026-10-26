@@ -20,6 +20,7 @@ public sealed class HardwareMediaContentTests(ITestOutputHelper output)
             await using var service = CreateService(root);
             var system = (await service.GetAudioDevicesAsync(AudioSourceKind.SystemAudio)).First(device => device.IsDefault);
             var display = (await service.GetCaptureTargetsAsync()).First(target => target.Kind == CaptureTargetKind.Display);
+            output.WriteLine($"Discovered display: {display.Width}x{display.Height}");
             using var enumerator = new MMDeviceEnumerator();
             using var device = enumerator.GetDevice(system.Id);
             using var player = new WasapiOut(device, AudioClientShareMode.Shared, false, 100);
@@ -152,11 +153,12 @@ public sealed class HardwareMediaContentTests(ITestOutputHelper output)
         var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
         var clip = await Windows.Media.Editing.MediaClip.CreateFromFileAsync(file);
         var properties = clip.GetVideoEncodingProperties();
+        output.WriteLine($"Video stream: {properties.Width}x{properties.Height}, duration={clip.OriginalDuration.TotalSeconds:F3}s");
         Assert.True(properties.Width >= 2 && properties.Width % 2 == 0);
         Assert.True(properties.Height >= 2 && properties.Height <= 720 && properties.Height % 2 == 0);
         var composition = new Windows.Media.Editing.MediaComposition();
         composition.Clips.Add(clip);
-        using var thumbnail = await composition.GetThumbnailAsync(clip.OriginalDuration / 2, 160, 0,
+        using var thumbnail = await composition.GetThumbnailAsync(clip.OriginalDuration / 2, 160, 90,
             Windows.Media.Editing.VideoFramePrecision.NearestFrame);
         var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(thumbnail);
         var data = await decoder.GetPixelDataAsync(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
