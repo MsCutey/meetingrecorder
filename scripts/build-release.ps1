@@ -1,6 +1,7 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-    [string] $Version = "1.1.3",
+    [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
+    [string] $Version = "1.2.0-beta",
     [string] $DotNet = "dotnet",
     [string] $MakeNsis = "makensis",
     [switch] $SkipInstaller
@@ -8,14 +9,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot "artifacts"))
-if (-not $artifactsRoot.StartsWith($repositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+$artifactsRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot "artifacts\windows-$Version"))
+if (-not $artifactsRoot.StartsWith($repositoryRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw "发布目录必须位于仓库内部。"
 }
 if (Test-Path -LiteralPath $artifactsRoot) {
-    Remove-Item -LiteralPath $artifactsRoot -Recurse -Force
+    throw "发布目录已存在，请先核对并归档或清理后重试：$artifactsRoot"
 }
-New-Item -ItemType Directory -Path $artifactsRoot | Out-Null
 
 $solution = Join-Path $repositoryRoot "MeetingRecorder.sln"
 $project = Join-Path $repositoryRoot "src\MeetingRecorder.App\MeetingRecorder.App.csproj"
@@ -49,6 +49,7 @@ if ($LASTEXITCODE -ne 0) { throw "win-x64 运行时包还原失败。" }
 if ($LASTEXITCODE -ne 0) { throw "Worker 的 win-x64 运行时包还原失败。" }
 & $DotNet test $tests -c Release -p:Platform=x64 --no-restore
 if ($LASTEXITCODE -ne 0) { throw "测试失败。" }
+New-Item -ItemType Directory -Path $artifactsRoot | Out-Null
 & $DotNet publish $project -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:Version=$Version -p:PublishSingleFile=false --no-restore -o $installedDirectory
 if ($LASTEXITCODE -ne 0) { throw "自包含发布失败。" }
 $workerDirectory = Join-Path $installedDirectory "Worker"
@@ -83,7 +84,8 @@ if (-not $SkipInstaller) {
     }
     else {
         $script = Join-Path $repositoryRoot "installer\MeetingRecorder.nsi"
-        & $makeNsisCommand.Source "/INPUTCHARSET" "UTF8" "/DVERSION=$Version" "/DAPP_FILES=$installedDirectory" "/DVC_REDIST=$vcRedist" "/DAPP_ICON=$appIcon" "/DOUTPUT_FILE=$installerOutput" $script
+        $numericVersion = ($Version -split '-')[0]
+        & $makeNsisCommand.Source "/INPUTCHARSET" "UTF8" "/DVERSION=$Version" "/DNUMERIC_VERSION=$numericVersion.0" "/DAPP_FILES=$installedDirectory" "/DVC_REDIST=$vcRedist" "/DAPP_ICON=$appIcon" "/DOUTPUT_FILE=$installerOutput" $script
         if ($LASTEXITCODE -ne 0) { throw "NSIS 安装包生成失败。" }
     }
 }

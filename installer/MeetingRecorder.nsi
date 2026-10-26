@@ -6,7 +6,10 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 
 !ifndef VERSION
-!define VERSION "1.1.3"
+!define VERSION "1.2.0-beta"
+!endif
+!ifndef NUMERIC_VERSION
+!define NUMERIC_VERSION "1.2.0.0"
 !endif
 !ifndef APP_FILES
   !error "APP_FILES 未定义"
@@ -30,7 +33,7 @@ SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUninstDetails show
 
-VIProductVersion "${VERSION}.0"
+VIProductVersion "${NUMERIC_VERSION}"
 VIAddVersionKey /LANG=2052 "ProductName" "MeetingRecorder"
 VIAddVersionKey /LANG=2052 "FileDescription" "MeetingRecorder 会议录屏安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"

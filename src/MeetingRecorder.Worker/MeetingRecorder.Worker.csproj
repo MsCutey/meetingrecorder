@@ -4,6 +4,7 @@
     <AssemblyName>MeetingRecorder.Worker</AssemblyName>
     <RootNamespace>MeetingRecorder.Worker</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MeetingRecorder.Core\MeetingRecorder.Core.csproj" />
